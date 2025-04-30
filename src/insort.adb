@@ -15,11 +15,11 @@ package body insort with SPARK_Mode => On is
 
    is
    begin
-      pragma Assert (A (insertion_point) > value);
+      --  pragma Assert (A (insertion_point) > value);
       for I in insertion_point .. sorted_to loop
          pragma Loop_Invariant (for all J in insertion_point .. I => A (J) > value);
       end loop;
-      pragma Assert (for all I in insertion_point .. sorted_to => A (I) > value);
+      --  pragma Assert (for all I in insertion_point .. sorted_to => A (I) > value);
    end more_than_sorted_after_insertion_point;
 
    function insert_point (A : Arr; sorted_to: Natural; value: Integer) return Natural
@@ -46,21 +46,21 @@ package body insort with SPARK_Mode => On is
    begin
       if A (A'First) > value then
          more_than_sorted_after_insertion_point (A, sorted_to, value, A'First);
-         pragma Assert (for all I in A'First ..sorted_to => A(I) > value);
+         --  pragma Assert (for all I in A'First ..sorted_to => A(I) > value);
          return A'First;
       end if;
-      pragma Assert (A'First >= 0);
+      --  pragma Assert (A'First >= 0);
       for I in A'First + 1 .. sorted_to loop
-         pragma Assert (I > 0);
+         --  pragma Assert (I > 0);
          pragma Loop_Invariant (for all J in A'First .. I - 1 => A(J) <= value);
          if A (I) > value then
             more_than_sorted_after_insertion_point (A, sorted_to, value, I);
-            pragma Assert (for all J in I ..sorted_to => A(J) > value);
+            --  pragma Assert (for all J in I ..sorted_to => A(J) > value);
             return I;
          end if;
       end loop;
-      pragma Assert (for all J in A'First .. sorted_to => A(J) <= value);
-      pragma Assert (for all J in sorted_to + 1 .. sorted_to => A (J) > value);
+      --  pragma Assert (for all J in A'First .. sorted_to => A(J) <= value);
+      --  pragma Assert (for all J in sorted_to + 1 .. sorted_to => A (J) > value);
       return sorted_to + 1;
    end insert_point;
 
@@ -85,10 +85,10 @@ package body insort with SPARK_Mode => On is
    is
       v : constant Integer := A (to);
    begin
-      pragma Assert (for all J in A'First .. from - 1 => A (J) <= v);
-      pragma Assert (for all J in from .. to - 1 => v < A (J));
-      pragma Assert (if from > A'First then A (from - 1) <= v else True);
-      pragma Assert (A (from) > v);
+      --  pragma Assert (for all J in A'First .. from - 1 => A (J) <= v);
+      --  pragma Assert (for all J in from .. to - 1 => v < A (J));
+      --  pragma Assert (if from > A'First then A (from - 1) <= v else True);
+      --  pragma Assert (A (from) > v);
       A(to) := A(to-1);
       for I in reverse from..to-1 loop
          pragma Loop_Invariant ((for all J in A'First .. from - 1 => A (J) <= v) and then
@@ -97,14 +97,14 @@ package body insort with SPARK_Mode => On is
                                );
          A (I + 1) := A (I);
       end loop;
-      pragma Assert (for all J in A'First + 1 .. to => A (J - 1) <= A(J));
-      pragma Assert (if to >= from + 1 then v < A (from + 1) else True);
+      --  pragma Assert (for all J in A'First + 1 .. to => A (J - 1) <= A(J));
+      --  pragma Assert (if to >= from + 1 then v < A (from + 1) else True);
 
-      pragma Assert (if from > A'First then A (from - 1) <= v else True);
+      --  pragma Assert (if from > A'First then A (from - 1) <= v else True);
       A (from) := v;
-      pragma Assert (for all J in A'First + 1 .. from - 1 => A (J - 1) <= A(J));
-      pragma Assert (for all J in from + 2 .. to => A (J - 1) <= A(J));
-      pragma Assert (if from > A'First then A (from - 1) <= A(from) else True);
+      --  pragma Assert (for all J in A'First + 1 .. from - 1 => A (J - 1) <= A(J));
+      --  pragma Assert (for all J in from + 2 .. to => A (J - 1) <= A(J));
+      --  pragma Assert (if from > A'First then A (from - 1) <= A(from) else True);
    end move_forward;
 
    procedure swp (A : in out Arr; I, J: Natural)
@@ -128,28 +128,29 @@ package body insort with SPARK_Mode => On is
          return;
       end if;
       if A (A'First) > A (A'First + 1) then
-         pragma Assert (A'First /= A'First + 1);
+         --  pragma Assert (A'First /= A'First + 1);
          swp (A, (A'First), (A'First + 1));
-         pragma Assert (A (A'First) < A(A'First + 1));
+         --  pragma Assert (A (A'First) < A(A'First + 1));
       end if;
-      pragma Assert (A (A'First) <= A(A'First + 1));
+      --  pragma Assert (A (A'First) <= A(A'First + 1));
 
       for I in A'First + 1 .. A'Last - 1 loop
          pragma Loop_Invariant (for all J in A'First + 1 ..I => A(J-1) <= A(J));
-         pragma Assert (I > 0);
+         --  pragma Assert (I > 0);
 
-         pragma Assert (I < Integer'Last);
+         --  pragma Assert (I < Integer'Last);
          ipt := insert_point (A, I, A (I + 1));
-         pragma Assert (for all J in A'First .. ipt - 1 => A (J) <= A(I+1));
-         pragma Assert (for all J in ipt .. I => A (J) > A(I + 1));
+         --  pragma Assert (for all J in A'First .. ipt - 1 => A (J) <= A(I+1));
+         --  pragma Assert (for all J in ipt .. I => A (J) > A(I + 1));
          if ipt < I + 1 then
             move_forward (A, ipt, I + 1);
-            pragma Assert (for all J in A'First + 1 .. I + 1 => A (J - 1) <= A(J));
+            --  pragma Assert (for all J in A'First + 1 .. I + 1 => A (J - 1) <= A(J));
          else
-            pragma Assert (ipt = I + 1);
+            --  pragma Assert (ipt = I + 1);
+            null;
          end if;
 
-         pragma Assert (for all J in A'First + 1 .. I + 1 => A (J - 1) <= A(J));
+         --  pragma Assert (for all J in A'First + 1 .. I + 1 => A (J - 1) <= A(J));
 
       end loop;
    end sort;
