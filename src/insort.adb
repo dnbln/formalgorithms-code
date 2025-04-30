@@ -80,22 +80,48 @@ package body insort with SPARK_Mode => On is
               ),
        Post => (
                   A (from) = A'Old (to) and then
-                    (for all I in A'First + 1 .. to => A (I - 1) <= A(I))
+                    (for all I in from + 1 .. to => A (I) = A'Old (I - 1)) and then
+                    (for all I in A'First + 1 .. to => A (I - 1) <= A(I)) and then
+                    (for all I in A'Range => (for some X in A'Range => A'Old (I) = A(X)))
                )
    is
       v : constant Integer := A (to);
+      AOld : constant Arr := A with Ghost;
+      pragma Assert (A'First = AOld'First);
+      pragma Assert (A'Last = AOld'Last);
+      pragma Assert (A'Length = AOld'Length);
+      pragma Assert (for all I in A'Range => A(I) = AOld(I));
+      pragma Assert ((for all I in A'First + 1 .. to - 1 => AOld (I - 1) <= AOld (I)));
    begin
       --  pragma Assert (for all J in A'First .. from - 1 => A (J) <= v);
       --  pragma Assert (for all J in from .. to - 1 => v < A (J));
       --  pragma Assert (if from > A'First then A (from - 1) <= v else True);
       --  pragma Assert (A (from) > v);
       A(to) := A(to-1);
-      for I in reverse from..to-1 loop
-         pragma Loop_Invariant ((for all J in A'First .. from - 1 => A (J) <= v) and then
-                                  (for all J in from .. to - 1 => A (J) > v) and then
-                                (for all J in A'First + 1 .. to => A(J - 1) <= A(J))
+      pragma Assert (A(to) = AOld(to - 1));
+      for I in reverse from + 1..to loop
+         pragma Loop_Invariant (((for all J in I + 1 .. to => A(J) = AOld(J - 1))) and then
+                                 (for all J in A'First..from => A(J) = AOld(J)) and then
+                                    (for all J in A'First .. from - 1 => A (J) <= v) and then
+                                       (for all J in from .. to => A (J) > v) and then
+                                          (for all J in A'First + 1 .. to => A(J - 1) <= A(J)) and then
+                                             (for all J in to + 1 .. A'Last => A(J) = AOld(J))
                                );
-         A (I + 1) := A (I);
+         pragma Assert (for all J in I+1 .. to => A (J) = AOld (J - 1));
+         pragma Assert (I >= from + 1);
+         pragma Assert (I <= to);
+         pragma Assert (A (I - 1) > v);
+         pragma Assert (A (I - 1) <= A(I));
+         A (I) := A (I - 1);
+         pragma Assert (A (I) > v);
+         pragma Assert (A (I - 1) = AOld (I - 1));
+         pragma Assert (for all J in I .. to => A (J) = AOld (J - 1));
+         pragma Assert (for all J in from .. I => A(J) > v);
+         pragma Assert (for all J in I + 1 .. to => A (J) > v);
+         pragma Assert (for all J in from .. to => A(J) > v);
+         pragma Assert (for all J in A'First .. from => A (J) = AOld (J));
+         pragma Assert (for all J in A'First .. from - 1 => A (J) <= v);
+         pragma Assert (for all J in A'First + 1 .. A'Last => A (J - 1) <= A (J));
       end loop;
       --  pragma Assert (for all J in A'First + 1 .. to => A (J - 1) <= A(J));
       --  pragma Assert (if to >= from + 1 then v < A (from + 1) else True);
@@ -121,8 +147,10 @@ package body insort with SPARK_Mode => On is
    procedure sort (A : in out Arr)
      with
        Refined_Post => (for all I in A'First + 1 .. A'Last => A (I - 1) <= A (I))
+            and then (for all I in A'Range => (for some X in A'Range => A'Old (I) = A(X)))
    is
       ipt : Natural;
+      AOld : Arr := A with Ghost;
    begin
       if A'Length < 2 then
          return;
@@ -135,7 +163,8 @@ package body insort with SPARK_Mode => On is
       --  pragma Assert (A (A'First) <= A(A'First + 1));
 
       for I in A'First + 1 .. A'Last - 1 loop
-         pragma Loop_Invariant (for all J in A'First + 1 ..I => A(J-1) <= A(J));
+         pragma Loop_Invariant ((for all J in A'First + 1 ..I => A(J-1) <= A(J))
+         and then (for all I in A'Range => (for some X in A'Range => AOld (I) = A(X))));
          --  pragma Assert (I > 0);
 
          --  pragma Assert (I < Integer'Last);
@@ -145,6 +174,7 @@ package body insort with SPARK_Mode => On is
          if ipt < I + 1 then
             move_forward (A, ipt, I + 1);
             --  pragma Assert (for all J in A'First + 1 .. I + 1 => A (J - 1) <= A(J));
+            pragma Assert (for all J in A'First .. I + 1 => (for some X in A'First .. I + 1 => AOld(J) = A(X)));
          else
             --  pragma Assert (ipt = I + 1);
             null;
