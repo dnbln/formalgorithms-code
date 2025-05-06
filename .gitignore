@@ -12,3 +12,7 @@ obj
 /bin/
 /alire/
 /config/
+/src/*.code-workspace
+/bin/
+/alire/
+/config/

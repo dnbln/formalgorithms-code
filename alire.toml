@@ -1,26 +1,13 @@
-authors = [
-"Alejandro R. Mosteo",
-]
-description = "'Hello, world!' demonstration project"
-executables = [
-"hello",
-]
-licenses = "MIT"
-maintainers = [
-"Alejandro R. Mosteo <alejandro@mosteo.com>",
-]
-maintainers-logins = [
-"mosteo",
-]
-name = "hello"
-tags = [
-"hello",
-"demo",
-]
-version = "1.0.2"
-website = "https://github.com/alire-project/hello"
-[[depends-on]]
-libhello = "^1.0"
+name = "formalgorithms"
+description = "Formal proofs in SPARK"
+version = "0.1.0-dev"
+
+authors = ["Dinu Blanovschi"]
+maintainers = ["Dinu Blanovschi <git@dnbln.dev>"]
+maintainers-logins = ["dnbln"]
+licenses = "MIT OR Apache-2.0 WITH LLVM-exception"
+website = ""
+tags = []
 
 [[depends-on]]
 gnatprove = "^14.1.1"
