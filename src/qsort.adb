@@ -71,9 +71,7 @@ is
        A'Last < Integer'Last - 1
        and then A'Length > 0
        and then A'Length < Integer'Last
-
-       and then I >= A'First
-       and then I <= A'Last
+       and then I in A'Range
        and then I + 1 < Integer'Last
        and then (for all P in A'First .. I - 1 => A (P) <= A (I))
        and then (for all P in I + 1 .. A'Last => A (P) > A (I)),
@@ -382,7 +380,6 @@ is
          pragma Loop_Invariant (j <= A'Last);
          pragma Loop_Invariant (Multiset_Unchanged (A, AOld));
          pragma Loop_Invariant (A (A'First) = AOld (A'First));
-         --  pragma Loop_Variant (Decreases => (j - i));
 
          pragma
            Loop_Invariant
