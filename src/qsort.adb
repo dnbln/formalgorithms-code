@@ -1,4 +1,4 @@
-with Ada.Text_IO;   use Ada.Text_IO;
+--  with Ada.Text_IO;   use Ada.Text_IO;
 with Lemmas.Sorted; use Lemmas.Sorted;
 
 package body qsort
@@ -85,7 +85,6 @@ is
       Piv       : Integer renames A(I);
       ARight    : IArr renames A(I+1..A'Last);
       ALeftOld  : constant IArr(A'First..I-1) := AOld(A'First..I-1) with Ghost;
-      PivOld    : Integer renames AOld(I);
       ARightOld : constant IArr(I+1..A'Last) := AOld(I+1..A'Last) with Ghost;
 
       procedure Lemma1A (A : IArr; Start : Integer)
@@ -258,13 +257,7 @@ is
         Always_Terminates => True
       is
       begin
-         --  if I > A'First then
-         --     Unchanged_Transitivity(A(A'First..I-1), ALeftOld, AOld(A'First..I-1));
-         --  end if;
          New_Element (A(A'First..I), AOld(A'First..I));
-         --  if I < A'Last then
-         --     Unchanged_Transitivity(A(I+1..A'Last), ARightOld, AOld(I+1..A'Last));
-         --  end if;
          Unchanged_Join (A, AOld, A(A'First..I), A (I+1..A'Last));
       end Lemma4;
 
@@ -358,7 +351,6 @@ is
       AOld       : constant IArr (A'Range) := A
       with Ghost;
    begin
-      --  Put_Line("Sorting " & Integer'Image(A'First) & " to " & Integer'Image(A'Last));
       if A'Length <= 1 then
          return;
       end if;
@@ -400,44 +392,22 @@ is
                 (for all P in j + 1 .. A'Last => A (P) > pivotvalue);
          end loop;
          if i < j then
-            --  Put("swapping " & Integer'Image(i) & " and " & Integer'Image(j) & " => ");
             Swap_Array (A, i, j);
-         --  for K in A'First .. A'Last loop
-         --     Put(Integer'Image(A(K)) & " ");
-         --  end loop;
-         --  New_Line;
-
          end if;
       end loop;
-      --  pragma Assert (i > A'First);
-      --  pragma Assert (i = j);
       pragma Assert (for all P in A'First .. i - 1 => A (P) <= pivotvalue);
       pragma Assert (for all P in i + 1 .. A'Last => A (P) > pivotvalue);
 
-      --  A(i) := pivotvalue;
       if A (i) > pivotvalue then
          i := i - 1;
       end if;
-
-      --  pragma Assert (i >= A'First);
 
       pragma Assert (A (A'First) = AOld (A'First));
       Swap_Array (A, A'First, i);
       pragma Assert (A (i) = AOld (A'First));
 
-      --  Put("Pivot " & Integer'Image(pivotvalue) & " at " & Integer'Image(i) & " => ");
-
-      --  for K in A'First .. A'Last loop
-      --     Put(Integer'Image(A(K)) & " ");
-      --  end loop;
-      --  New_Line;
-
       pragma Assert (A'Last < Integer'Last);
 
       Multiset_Split_Sort (A, i);
-   --  pragma Assert (i <= A'Last);
-   --  pragma Assert (for all P in i + 1 .. A'Last => A (P) > A (i));
-
-   --  Put_Line("Sorted " & Integer'Image(A'First) & " to " & Integer'Image(A'Last));
    end sort;
 end qsort;
