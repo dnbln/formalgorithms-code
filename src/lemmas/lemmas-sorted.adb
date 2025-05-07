@@ -1,4 +1,6 @@
-package body Lemmas.Sorted is
+package body Lemmas.Sorted
+  with SPARK_Mode
+is
    procedure Occ_Equal (A : IArr; B : IArr; E : Integer) is
    begin
       if A'Length = 0 then
@@ -73,7 +75,12 @@ package body Lemmas.Sorted is
       end if;
    end Has_Value_To_Occ;
 
-   procedure Partial_Eq (A, B : IArr; Eq : Integer; E : Integer) is
+   procedure Partial_Eq (A, B : IArr; Eq : Integer; E : Integer)
+   with
+     Refined_Post =>
+       Occ (A (A'First .. Eq - 1), E)
+       = Occ (B (B'First .. Eq - A'First + B'First - 1), E)
+   is
    begin
       if A'Last = Eq then
          return;
@@ -130,7 +137,7 @@ package body Lemmas.Sorted is
 
    procedure Doesnt_Have_Value_To_Occ (A : IArr; V : Integer) is
    begin
-      if A'Length = 1 then
+      if A'Length <= 1 then
          pragma Assert (not Has_Value (A, V));
          return;
       end if;
@@ -147,8 +154,81 @@ package body Lemmas.Sorted is
    procedure Unchanged_Join (A, T, L, R : IArr)
    with Refined_Post => Multiset_Unchanged (A, T)
    is
+      procedure Occ_Join_Lemma (A : IArr; P : Natural; X : Integer)
+      with
+        Pre  =>
+          A'Last < Integer'Last
+          and then A'Length < Integer'Last
+          and then P in A'Range,
+        Post =>
+          (Occ_Def (A, X)
+           = Occ_Def (A (A'First .. P), X) + Occ_Def (A (P + 1 .. A'Last), X))
+      is
+      begin
+         if P = A'Last then
+            --  if A(P) = X then
+            --  pragma Assert(Occ_Def(A(P..P), X) = 1);
+            --  pragma Assert(Occ_Def(A(P..A'Last), X) = Occ_Def(A(P..P), X));
+            --  pragma Assert(Occ_Def(A, X) = Occ_Def(A(A'First..P-1), X) + Occ_Def(A(P..A'Last), X));
+            --  else
+            --  pragma Assert(Occ_Def(A(P..P), X) = 0);
+            --  pragma Assert(Occ_Def(A(P..A'Last), X) = Occ_Def(A(P..P), X));
+            --  pragma Assert(Occ_Def(A, X) = Occ_Def(A(A'First..P-1), X) + Occ_Def(A(P..A'Last), X));
+            --  end if;
+            return;
+         end if;
+
+         Occ_Join_Lemma (A, P + 1, X);
+         --  pragma Assert(Occ_Def(A, X) = Occ_Def(A(A'First..P+1), X) + Occ_Def(A(P+2..A'Last), X));
+         --  pragma Assert(Occ_Def(A(A'First..P+1), X) = Occ_Def(A(A'First..P), X) + Occ_Def(A(P+1..P+1), X));
+         Occ_Join_Lemma (A (P + 1 .. A'Last), P + 1, X);
+      --  pragma Assert(Occ_Def(A(P+1..A'Last), X) = Occ_Def(A(P+1..P+1), X) + Occ_Def(A(P + 2..A'Last), X));
+      end Occ_Join_Lemma;
+   begin
+      if not Multiset_Unchanged (A, T) then
+         pragma Assert (for some X in Integer => Occ (A, X) /= Occ (T, X));
+
+         --  pragma Assert (for all X in Integer => Occ(A(L'Range), X) = Occ(T(L'Range), X));
+         --  pragma Assert (for all X in Integer => Occ(A(R'Range), X) = Occ(T(R'Range), X));
+
+         Occ_Join_Lemma (A, L'Last, Integer'First);
+         for X in Integer'First + 1 .. Integer'Last loop
+            pragma
+              Loop_Invariant
+                (for all V in Integer'First .. X - 1
+                 => Occ (A, V) = Occ (A (L'Range), V) + Occ (A (R'Range), V));
+            Occ_Join_Lemma (A, L'Last, X);
+         end loop;
+         --  pragma Assert (for all X in Integer => Occ(A, X) = Occ(A(L'Range), X) + Occ(A(R'Range), X));
+
+         Occ_Join_Lemma (T, L'Last, Integer'First);
+         for X in Integer'First + 1 .. Integer'Last loop
+            pragma
+              Loop_Invariant
+                (for all V in Integer'First .. X - 1
+                 => Occ (T, V) = Occ (T (L'Range), V) + Occ (T (R'Range), V));
+            Occ_Join_Lemma (T, L'Last, X);
+         end loop;
+         --  pragma Assert (for all X in Integer => Occ(T, X) = Occ(T(L'Range), X) + Occ(T(R'Range), X));
+
+         pragma Assert (for all X in Integer => Occ (A, X) = Occ (T, X));
+         pragma Assert (False);
+      end if;
+   end Unchanged_Join;
+
+   procedure Weak_Sorted_To_Def (A : IArr)
+   with
+     Refined_Post => (for all I in A'First + 1 .. A'Last => A (I - 1) <= A (I))
+   is
    begin
       null;
-   end Unchanged_Join;
+   end Weak_Sorted_To_Def;
+
+   procedure Weak_Sorted_Subrange (A, S : IArr)
+   with Refined_Post => Weak_Sorted (A (S'Range))
+   is
+   begin
+      null;
+   end Weak_Sorted_Subrange;
 
 end Lemmas.Sorted;

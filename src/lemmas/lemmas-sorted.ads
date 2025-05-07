@@ -6,8 +6,17 @@ is
    function Remove_Last (A : IArr) return IArr
    is (A (A'First .. A'Last - 1))
    with
-     Pre  => A'Length > 0 and then A'Last > Integer'First,
-     Post => Remove_Last'Result'Length = A'Length - 1,
+     Pre  =>
+       A'Length > 0
+       and then A'Last > Integer'First
+       and then A'Last < Integer'Last
+       and then A'Length < Integer'Last,
+     Post =>
+       Remove_Last'Result'First = A'First
+       and then Remove_Last'Result'Last = A'Last - 1
+       and then Remove_Last'Result'Length = A'Length - 1
+       and then Remove_Last'Result'Last < Integer'Last
+       and then Remove_Last'Result'Length < Integer'Last,
      Ghost;
 
    function Occ_Def (A : IArr; Val : Integer) return Natural
@@ -80,9 +89,14 @@ is
 
    procedure Occ_Equal (A : IArr; B : IArr; E : Integer)
    with
-     Pre  =>
-       A = B and then A'Last < Integer'Last and then A'Length < Integer'Last,
-     Post => Occ (A, E) = Occ (B, E);
+     Pre                =>
+       A = B
+       and then A'Last < Integer'Last
+       and then A'Length < Integer'Last
+       and then B'Last < Integer'Last
+       and then B'Length < Integer'Last,
+     Post               => Occ (A, E) = Occ (B, E),
+     Subprogram_Variant => (Decreases => A'Length);
 
    function Is_Set
      (A : IArr; J : Integer; V : Integer; B : IArr) return Boolean
@@ -95,23 +109,26 @@ is
    procedure Occ_Set
      (A : IArr; B : IArr; J : Integer; V : Integer; E : Integer)
    with
-     Global            => null,
-     Always_Terminates => True,
-     Pre               =>
+     Global             => null,
+     Always_Terminates  => True,
+     Pre                =>
        J in A'Range
        and then Is_Set (A, J, V, B)
        and then A'Last < Integer'Last
        and then A'Length < Integer'Last
        and then B'Last < Integer'Last
        and then B'Length < Integer'Last,
-     Post              =>
+     Post               =>
        (if V = A (J)
         then Occ (B, E) = Occ (A, E)
         elsif V = E
         then Occ (B, E) = Occ (A, E) + 1
         elsif A (J) = E
         then Occ (B, E) = Occ (A, E) - 1
-        else Occ (B, E) = Occ (A, E));
+        else Occ (B, E) = Occ (A, E)),
+     Subprogram_Variant => (Decreases => A'Length)
+
+   ;
 
    procedure New_Element (A, B : IArr)
    with
@@ -142,7 +159,9 @@ is
        and then R'Length < Integer'Last
        and then T'Length < Integer'Last
        and then A'First = L'First
+       and then L'Last <= A'Last
        and then L'Last = R'First - 1
+       and then R'First >= A'First
        and then R'Last = A'Last
        and then A'First = T'First
        and then A'Last = T'Last
@@ -181,30 +200,40 @@ is
      Post => Has_Value (A, V);
    procedure Occ_To_Doesnt_Have_Value (A : IArr; V : Integer)
    with
-     Global            => null,
-     Always_Terminates => True,
-     Pre               =>
+     Global             => null,
+     Always_Terminates  => True,
+     Pre                =>
        A'Length >= 1
        and then A'Last < Integer'Last
        and then A'Length < Integer'Last
        and then Occ (A, V) = 0,
-     Post              => not Has_Value (A, V);
+     Post               => not Has_Value (A, V),
+     Subprogram_Variant => (Decreases => A'Length);
 
    procedure Has_Value_To_Occ (A : IArr; V : Integer)
    with
-     Pre  => A'Length >= 1 and then Has_Value (A, V),
-     Post => Occ (A, V) >= 1;
+     Pre                =>
+       A'Length >= 1
+       and then A'Last < Integer'Last
+       and then A'Length < Integer'Last
+       and then Has_Value (A, V),
+     Post               => Occ (A, V) >= 1,
+     Subprogram_Variant => (Decreases => A'Length);
 
    procedure Doesnt_Have_Value_To_Occ (A : IArr; V : Integer)
    with
-     Global            => null,
-     Always_Terminates => True,
-     Pre               => not Has_Value (A, V),
-     Post              => Occ (A, V) = 0;
+     Global             => null,
+     Always_Terminates  => True,
+     Pre                =>
+       A'Last < Integer'Last
+       and then A'Length < Integer'Last
+       and then not Has_Value (A, V),
+     Post               => Occ (A, V) = 0,
+     Subprogram_Variant => (Decreases => A'Length);
 
    procedure Partial_Eq (A, B : IArr; Eq : Integer; E : Integer)
    with
-     Pre  =>
+     Pre                =>
        A'Length = B'Length
        and then A'Last < Integer'Last
        and then A'Length < Integer'Last
@@ -215,13 +244,16 @@ is
        and then (for all J in Eq .. A'Last
                  => A (J) = B (J - A'First + B'First))
        and then Occ (A, E) = Occ (B, E),
-     Post =>
+     Post               =>
        Occ (A (A'First .. Eq - 1), E)
-       = Occ (B (B'First .. Eq - A'First + B'First - 1), E);
+       = Occ (B (B'First .. Eq - A'First + B'First - 1), E),
+     Always_Terminates  => True,
+     Subprogram_Variant => (Decreases => A'Length);
 
    procedure Multiset_With_Eq (A, B : IArr; Eq : Integer)
    with
-     Pre  =>
+     Always_Terminates => True,
+     Pre               =>
        A'Length = B'Length
        and then A'Last < Integer'Last
        and then A'Length < Integer'Last
@@ -233,7 +265,7 @@ is
        and then Multiset_Unchanged (A, B)
        and then (for all J in Eq .. A'Last
                  => A (J) = B (J - A'First + B'First)),
-     Post =>
+     Post              =>
        Multiset_Unchanged
          (A (A'First .. Eq - 1), B (B'First .. Eq - A'First + B'First - 1));
 
@@ -241,16 +273,36 @@ is
    with
      Global            => null,
      Always_Terminates => True,
-     Pre               => A = B,
+     Pre               =>
+       A = B
+       and then A'Last < Integer'Last
+       and then A'Length < Integer'Last
+       and then B'Last < Integer'Last
+       and then B'Length < Integer'Last,
      Post              => Multiset_Unchanged (A, B);
 
    function Has_Value (A : IArr; Val : Integer) return Boolean
    is (for some I in A'Range => A (I) = Val);
 
    function Weak_Sorted (A : IArr) return Boolean
-   is (if A'First < Integer'Last
-       then (for all I in A'First + 1 .. A'Last => A (I - 1) <= A (I))
-       else True);
+   is (for all I in A'First + 1 .. A'Last => A (I - 1) <= A (I))
+   with Pre => A'First < Integer'Last;
+
+   procedure Weak_Sorted_To_Def (A : IArr)
+   with
+     Pre  => A'First < Integer'Last and then Weak_Sorted (A),
+     Post => (for all I in A'First + 1 .. A'Last => A (I - 1) <= A (I));
+
+   procedure Weak_Sorted_Subrange (A, S : IArr)
+   with
+     Pre  =>
+       A'First < Integer'Last
+       and then S'First >= A'First
+       and then S'Last <= A'Last
+       and then S'First < Integer'Last
+       and then A (S'Range) = S
+       and then Weak_Sorted (S),
+     Post => Weak_Sorted (A (S'Range));
 
 private
 
