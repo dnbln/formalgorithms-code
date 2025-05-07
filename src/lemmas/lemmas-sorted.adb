@@ -154,36 +154,6 @@ is
    procedure Unchanged_Join (A, T, L, R : IArr)
    with Refined_Post => Multiset_Unchanged (A, T)
    is
-      procedure Occ_Join_Lemma (A : IArr; P : Natural; X : Integer)
-      with
-        Pre  =>
-          A'Last < Integer'Last
-          and then A'Length < Integer'Last
-          and then P in A'Range,
-        Post =>
-          (Occ_Def (A, X)
-           = Occ_Def (A (A'First .. P), X) + Occ_Def (A (P + 1 .. A'Last), X))
-      is
-      begin
-         if P = A'Last then
-            --  if A(P) = X then
-            --  pragma Assert(Occ_Def(A(P..P), X) = 1);
-            --  pragma Assert(Occ_Def(A(P..A'Last), X) = Occ_Def(A(P..P), X));
-            --  pragma Assert(Occ_Def(A, X) = Occ_Def(A(A'First..P-1), X) + Occ_Def(A(P..A'Last), X));
-            --  else
-            --  pragma Assert(Occ_Def(A(P..P), X) = 0);
-            --  pragma Assert(Occ_Def(A(P..A'Last), X) = Occ_Def(A(P..P), X));
-            --  pragma Assert(Occ_Def(A, X) = Occ_Def(A(A'First..P-1), X) + Occ_Def(A(P..A'Last), X));
-            --  end if;
-            return;
-         end if;
-
-         Occ_Join_Lemma (A, P + 1, X);
-         --  pragma Assert(Occ_Def(A, X) = Occ_Def(A(A'First..P+1), X) + Occ_Def(A(P+2..A'Last), X));
-         --  pragma Assert(Occ_Def(A(A'First..P+1), X) = Occ_Def(A(A'First..P), X) + Occ_Def(A(P+1..P+1), X));
-         Occ_Join_Lemma (A (P + 1 .. A'Last), P + 1, X);
-      --  pragma Assert(Occ_Def(A(P+1..A'Last), X) = Occ_Def(A(P+1..P+1), X) + Occ_Def(A(P + 2..A'Last), X));
-      end Occ_Join_Lemma;
    begin
       if not Multiset_Unchanged (A, T) then
          pragma Assert (for some X in Integer => Occ (A, X) /= Occ (T, X));
@@ -230,5 +200,32 @@ is
    begin
       null;
    end Weak_Sorted_Subrange;
+
+   procedure Occ_Join_Lemma (A : IArr; P : Natural; X : Integer)
+      with
+        Refined_Post =>
+          (Occ_Def (A, X)
+           = Occ_Def (A (A'First .. P), X) + Occ_Def (A (P + 1 .. A'Last), X))
+      is
+      begin
+         if P = A'Last then
+            --  if A(P) = X then
+            --  pragma Assert(Occ_Def(A(P..P), X) = 1);
+            --  pragma Assert(Occ_Def(A(P..A'Last), X) = Occ_Def(A(P..P), X));
+            --  pragma Assert(Occ_Def(A, X) = Occ_Def(A(A'First..P-1), X) + Occ_Def(A(P..A'Last), X));
+            --  else
+            --  pragma Assert(Occ_Def(A(P..P), X) = 0);
+            --  pragma Assert(Occ_Def(A(P..A'Last), X) = Occ_Def(A(P..P), X));
+            --  pragma Assert(Occ_Def(A, X) = Occ_Def(A(A'First..P-1), X) + Occ_Def(A(P..A'Last), X));
+            --  end if;
+            return;
+         end if;
+
+         Occ_Join_Lemma (A, P + 1, X);
+         --  pragma Assert(Occ_Def(A, X) = Occ_Def(A(A'First..P+1), X) + Occ_Def(A(P+2..A'Last), X));
+         --  pragma Assert(Occ_Def(A(A'First..P+1), X) = Occ_Def(A(A'First..P), X) + Occ_Def(A(P+1..P+1), X));
+         Occ_Join_Lemma (A (P + 1 .. A'Last), P + 1, X);
+      --  pragma Assert(Occ_Def(A(P+1..A'Last), X) = Occ_Def(A(P+1..P+1), X) + Occ_Def(A(P + 2..A'Last), X));
+      end Occ_Join_Lemma;
 
 end Lemmas.Sorted;
