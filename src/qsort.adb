@@ -202,6 +202,8 @@ is
             Occ_To_Doesnt_Have_Value (A, A (C));
             pragma Assert (not Has_Value (A, A (C)));
             pragma Assert (Has_Value (A, A (C)));
+
+            pragma Assert (False);
          end if;
       end Lemma2RP;
 
