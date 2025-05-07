@@ -302,17 +302,17 @@ is
        and then S'First < Integer'Last
        and then A (S'Range) = S
        and then Weak_Sorted (S),
-         Post => Weak_Sorted (A (S'Range));
+     Post => Weak_Sorted (A (S'Range));
 
-     procedure Occ_Join_Lemma (A : IArr; P : Natural; X : Integer)
-      with
-        Pre  =>
-          A'Last < Integer'Last
-          and then A'Length < Integer'Last
-          and then P in A'Range,
-        Post =>
-          (Occ_Def (A, X)
-           = Occ_Def (A (A'First .. P), X) + Occ_Def (A (P + 1 .. A'Last), X));
+   procedure Occ_Join_Lemma (A : IArr; P : Natural; X : Integer)
+   with
+     Pre  =>
+       A'Last < Integer'Last
+       and then A'Length < Integer'Last
+       and then P in A'Range,
+     Post =>
+       (Occ_Def (A, X)
+        = Occ_Def (A (A'First .. P), X) + Occ_Def (A (P + 1 .. A'Last), X));
 
 private
 
