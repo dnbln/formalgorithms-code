@@ -265,6 +265,44 @@ is
                             = A.Data (BIdx)))));
    end Lemma_Key_Set_Minus;
 
+   procedure Lemma_Delete_Keeps_Uniqueness
+     (BOld, B : Bucket; P : Bucket_Data_Idx)
+   with
+     Ghost,
+     Pre  =>
+       BOld.Size = B.Size + 1
+       and then Unique_Keys (BOld)
+       and then (if P > 0
+                 then
+                   (for all I in Bucket_Data_Idx'First .. P - 1
+                    => BOld.Data (I) = B.Data (I)))
+       and then (if B.Size > 0
+                 then
+                   (for all I in P .. Bucket_Data_Idx (B.Size)
+                    => BOld.Data (I + 1) = B.Data (I))),
+     Post => Unique_Keys (B)
+   is
+   begin
+      if not Unique_Keys (B) then
+         pragma
+           Assert
+             (for some I in Bucket_Data_Idx'First .. Bucket_Data_Idx (B.Size)
+              => (for some J in Bucket_Data_Idx'First .. I - 1
+                  => (B.Data (I).Key = B.Data (J).Key)));
+         pragma
+           Assert
+             (for some I in Bucket_Data_Idx'First .. Bucket_Data_Idx (B.Size)
+              => (for some J in Bucket_Data_Idx'First .. I - 1
+                  => (if I < Bucket_Data_Idx (P)
+                      then (BOld.Data (J).Key = BOld.Data (I).Key)
+                      elsif J < Bucket_Data_Idx (P)
+                      then (BOld.Data (J).Key = BOld.Data (I + 1).Key)
+                      else (BOld.Data (J + 1).Key = BOld.Data (I + 1).Key))));
+         pragma Assert (not Unique_Keys (BOld));
+         pragma Assert (False);
+      end if;
+   end Lemma_Delete_Keeps_Uniqueness;
+
    procedure Delete_Key_Bucket (B : in out Bucket; Key : K)
    with
      Pre  => Unique_Keys (B) and then Contains_Key_Bucket (B, Key),
@@ -279,26 +317,72 @@ is
       with Ghost;
    begin
       pragma Assert (P > 0);
+      pragma Assert (Unique_Keys (BOld));
       if P = B.Size then
          B.Size := B.Size - 1;
          pragma Assert (Unique_Keys (B));
          pragma Assert (No_Changes_Other_Than_To_Key_Bucket (BOld, B, Key));
       elsif B.Size > 1 then
-         for I in Bucket_Data_Idx (P) .. Bucket_Data_Idx (B.Size - 1) loop
+         pragma Assert (Unique_Keys (B));
+         if P > 1 then
+            for I in Bucket_Data_Idx (P) .. Bucket_Data_Idx (B.Size - 1) loop
+               pragma
+                 Loop_Invariant
+                   (BOld.Data
+                      (Bucket_Data_Idx'First .. Bucket_Data_Idx (P - 1))
+                      = B.Data
+                          (Bucket_Data_Idx'First .. Bucket_Data_Idx (P - 1)));
+               pragma
+                 Loop_Invariant
+                   (for all J in Bucket_Data_Idx (P) .. I - 1
+                    => BOld.Data (J + 1) = B.Data (J));
+               B.Data (I) := B.Data (I + 1);
+            end loop;
+            B.Size := B.Size - 1;
             pragma
-              Loop_Invariant
-                (for all J in Bucket_Data_Idx (P) .. I - 1
-                 => BOld.Data (J + 1) = B.Data (J));
-            B.Data (I) := B.Data (I + 1);
-         end loop;
-         B.Size := B.Size - 1;
-         pragma Assume (Unique_Keys (B));
-         pragma
-           Assert
-             (for all I in Bucket_Data_Idx (P) .. Bucket_Data_Idx (B.Size)
-              => BOld.Data (I + 1) = B.Data (I));
-         Lemma_Key_Set_Minus (BOld, B, Bucket_Data_Idx (P), Key);
-         pragma Assert (No_Changes_Other_Than_To_Key_Bucket (BOld, B, Key));
+              Assert
+                (for all J in Bucket_Data_Idx'First .. Bucket_Data_Idx (P - 1)
+                 => B.Data (J) = BOld.Data (J));
+            pragma
+              Assert
+                (for all J in Bucket_Data_Idx (P) .. Bucket_Data_Idx (B.Size)
+                 => B.Data (J) = BOld.Data (J + 1));
+
+            Lemma_Delete_Keeps_Uniqueness (BOld, B, Bucket_Data_Idx (P));
+
+            pragma Assert (Unique_Keys (B));
+            pragma
+              Assert
+                (for all I in Bucket_Data_Idx (P) .. Bucket_Data_Idx (B.Size)
+                 => BOld.Data (I + 1) = B.Data (I));
+            Lemma_Key_Set_Minus (BOld, B, Bucket_Data_Idx (P), Key);
+            pragma Assert (No_Changes_Other_Than_To_Key_Bucket (BOld, B, Key));
+         else
+            pragma Assert (P = 1);
+
+            for I in Bucket_Data_Idx (P) .. Bucket_Data_Idx (B.Size - 1) loop
+               pragma
+                 Loop_Invariant
+                   (for all J in Bucket_Data_Idx (P) .. I - 1
+                    => BOld.Data (J + 1) = B.Data (J));
+               B.Data (I) := B.Data (I + 1);
+            end loop;
+            B.Size := B.Size - 1;
+            pragma
+              Assert
+                (for all J in Bucket_Data_Idx (P) .. Bucket_Data_Idx (B.Size)
+                 => B.Data (J) = BOld.Data (J + 1));
+
+            Lemma_Delete_Keeps_Uniqueness (BOld, B, Bucket_Data_Idx (P));
+
+            pragma Assert (Unique_Keys (B));
+            pragma
+              Assert
+                (for all I in Bucket_Data_Idx (P) .. Bucket_Data_Idx (B.Size)
+                 => BOld.Data (I + 1) = B.Data (I));
+            Lemma_Key_Set_Minus (BOld, B, Bucket_Data_Idx (P), Key);
+            pragma Assert (No_Changes_Other_Than_To_Key_Bucket (BOld, B, Key));
+         end if;
       elsif B.Size = 1 then
          B.Size := B.Size - 1;
          pragma Assert (Unique_Keys (B));
