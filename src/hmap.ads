@@ -37,16 +37,24 @@ package hmap with SPARK_Mode is
          Contains_Key_Bucket_Index ((Data => B.Data, Size => B.Size - 1), Key))
    with
      Subprogram_Variant => (Decreases => B.Size),
+     Pre                => Unique_Keys (B),
      Post               =>
        Contains_Key_Bucket_Index'Result <= B'Size
        and then (if B.Size > 0
                  then
-                   (if Contains_Key_Bucket_Index'Result /= 0
+                   (if Contains_Key_Bucket_Index'Result > 0
                     then
                       B.Data
                         (Bucket_Data_Idx (Contains_Key_Bucket_Index'Result))
                         .Key
                       = Key
+                      and then (for all P
+                                  in Bucket_Data_Idx'First
+                                     .. Bucket_Data_Idx (B.Size)
+                                => (if P
+                                      /= Bucket_Data_Idx
+                                           (Contains_Key_Bucket_Index'Result)
+                                    then B.Data (P).Key /= Key))
                     else
                       (for all P
                          in Bucket_Data_Idx'First .. Bucket_Data_Idx (B.Size)
@@ -55,6 +63,7 @@ package hmap with SPARK_Mode is
    function Contains_Key_Bucket (B : Bucket; Key : K) return Boolean
    is (Contains_Key_Bucket_Index (B, Key) /= 0)
    with
+     Pre  => Unique_Keys (B),
      Post =>
        (if B.Size > 0
         then
@@ -103,7 +112,10 @@ package hmap with SPARK_Mode is
 
    function Get_Node_Bucket (B : Bucket; Key : K) return Node
    with
-     Pre  => Contains_Key_Bucket (B, Key),
+     Pre  =>
+       Unique_Keys (B)
+       and then Contains_Key_Bucket (B, Key)
+       and then Unique_Keys (B),
      Post =>
        Get_Node_Bucket'Result.Key = Key
        and then Get_Node_Bucket'Result
@@ -113,12 +125,13 @@ package hmap with SPARK_Mode is
    procedure Insert (HM : in out Hash_Map; Key : K; Value : V)
    with
      Pre  =>
-       (if not Contains_Key (HM, Key) then not Bucket_Key_Is_Full (HM, Key))
-       and then All_Buckets_Have_Unique_Keys (HM),
+       All_Buckets_Have_Unique_Keys (HM)
+       and then (if not Contains_Key (HM, Key)
+                 then not Bucket_Key_Is_Full (HM, Key)),
      Post =>
-       Contains_Key (HM, Key)
+       All_Buckets_Have_Unique_Keys (HM)
+       and then Contains_Key (HM, Key)
        and then Get_Value (HM, Key) = Value
-       and then All_Buckets_Have_Unique_Keys (HM)
        and then No_Changes_Other_Than_To_Key (HM, HM'Old, Key);
 
    function No_Changes_Other_Than_To_Key_Bucket
@@ -153,15 +166,18 @@ package hmap with SPARK_Mode is
 
    procedure Delete_Key (HM : in out Hash_Map; Key : K)
    with
-     Pre  => Contains_Key (HM, Key) and then All_Buckets_Have_Unique_Keys (HM),
+     Pre  => All_Buckets_Have_Unique_Keys (HM) and then Contains_Key (HM, Key),
      Post =>
-       not Contains_Key (HM, Key)
+       All_Buckets_Have_Unique_Keys (HM)
+       and then (not Contains_Key (HM, Key))
        and then No_Changes_Other_Than_To_Key (HM'Old, HM, Key);
 
    function Get_Value (HM : Hash_Map; Key : K) return V
-   with Pre => Contains_Key (HM, Key);
+   with
+     Pre => All_Buckets_Have_Unique_Keys (HM) and then Contains_Key (HM, Key);
 
-   function Contains_Key (HM : Hash_Map; Key : K) return Boolean;
+   function Contains_Key (HM : Hash_Map; Key : K) return Boolean
+   with Pre => All_Buckets_Have_Unique_Keys (HM);
 
    function HM_Occ_Def_Bucket (B : Bucket; Key : K) return Bucket_Data_Size
    is (if B.Size = 0

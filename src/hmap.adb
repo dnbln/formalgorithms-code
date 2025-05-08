@@ -13,7 +13,7 @@ is
 
    function Get_Value_Bucket (B : Bucket; Key : K) return V
    is (Get_Node_Bucket (B, Key).Value)
-   with Pre => Contains_Key_Bucket (B, Key);
+   with Pre => Unique_Keys (B) and then Contains_Key_Bucket (B, Key);
 
    procedure Other_Buckets_Unchanged
      (HM, HMOld : Hash_Map; Changed : Bucket_Idx; Key : K)
@@ -86,9 +86,9 @@ is
    procedure Do_Insert_Into_Bucket (B : in out Bucket; Key : K; Value : V)
    with
      Pre  =>
-       (not Contains_Key_Bucket (B, Key)
-        and then not Bucket_Is_Full (B)
-        and then Unique_Keys (B)),
+       Unique_Keys (B)
+       and then (not Contains_Key_Bucket (B, Key))
+       and then (not Bucket_Is_Full (B)),
      Post =>
        (B.Size = B'Old.Size + 1
         and then B.Size > 0
@@ -115,26 +115,59 @@ is
      (B : in out Bucket; P : Bucket_Data_Idx; Key : K; Value : V)
    with
      Pre  =>
-       Contains_Key_Bucket_Index (B, Key) = Bucket_Data_Size (P)
-       and then B.Data (P).Key = Key
-       and then Unique_Keys (B),
+       Unique_Keys (B)
+       and then Contains_Key_Bucket_Index (B, Key) = Bucket_Data_Size (P)
+       and then P <= Bucket_Data_Idx (B.Size)
+       and then B.Data (P).Key = Key,
      Post =>
        B.Size = B'Old.Size
+       and then Unique_Keys (B)
+       and then B.Data (Bucket_Data_Idx'First .. P - 1)
+                = B'Old.Data (Bucket_Data_Idx'First .. P - 1)
+       and then B.Data (P + 1 .. Bucket_Data_Idx'Last)
+                = B'Old.Data (P + 1 .. Bucket_Data_Idx'Last)
        and then Contains_Key_Bucket (B, Key)
        and then Get_Value_Bucket (B, Key) = Value
-       and then Unique_Keys (B)
        and then No_Changes_Other_Than_To_Key_Bucket (B, B'Old, Key)
    is
+      BOld : constant Bucket := B
+      with Ghost;
    begin
       B.Data (P).Value := Value;
+      pragma Assert (B.Data (P).Key = BOld.Data (P).Key);
+      pragma Assert (B.Data (P).Key = Key);
+      pragma Assert (Unique_Keys (B));
+      pragma Assert (Unique_Keys (BOld));
       Lemma_If_Is_In_Bucket_Then_Get_Value_Returns_It (B, P, Key, Value);
+      pragma
+        Assert
+          (for all I in Bucket_Data_Idx'First .. Bucket_Data_Idx (B.Size)
+           => (if I /= P then B.Data (I).Key /= Key));
+      pragma
+        Assert
+          (for all I in Bucket_Data_Idx'First .. Bucket_Data_Idx (B.Size)
+           => (if I /= P
+               then
+                 Contains_Key_Bucket_Index (BOld, B.Data (I).Key)
+                 = Bucket_Data_Size (I)));
+      pragma
+        Assert
+          (for all I in Bucket_Data_Idx'First .. Bucket_Data_Idx (B.Size)
+           => (if I /= P
+               then Get_Node_Bucket (BOld, B.Data (I).Key) = BOld.Data (I)));
+      pragma
+        Assert
+          (for all I in Bucket_Data_Idx'First .. Bucket_Data_Idx (B.Size)
+           => (if I /= P
+               then Get_Node_Bucket (BOld, B.Data (I).Key) = B.Data (I)));
    end Replace_In_Bucket;
 
    procedure Insert_Bucket (B : in out Bucket; Key : K; Value : V)
    with
      Pre  =>
-       (if not Contains_Key_Bucket (B, Key) then not Bucket_Is_Full (B))
-       and then Unique_Keys (B),
+       Unique_Keys (B)
+       and then (if not Contains_Key_Bucket (B, Key)
+                 then not Bucket_Is_Full (B)),
      Post =>
        Contains_Key_Bucket (B, Key)
        and then Get_Value_Bucket (B, Key) = Value
@@ -201,15 +234,43 @@ is
        and then No_Changes_Other_Than_To_Key_Bucket (A, B, Key)
    is
    begin
-      null;
+      pragma
+        Assert
+          (((for all BIdx in Bucket_Data_Idx'First .. Bucket_Data_Idx (A.Size)
+             => (if BIdx /= Partition then A.Data (BIdx).Key /= Key))));
+      pragma
+        Assert
+          (((for all BIdx in Bucket_Data_Idx'First .. Bucket_Data_Idx (A.Size)
+             => (if A.Data (BIdx).Key = Key then BIdx = Partition))));
+      pragma
+        Assert
+          (((for all BIdx in Bucket_Data_Idx'First .. Bucket_Data_Idx (A.Size)
+             => (if A.Data (BIdx).Key /= Key
+                 then
+                   Contains_Key_Bucket (B, A.Data (BIdx).Key)
+                   and then (if BIdx < Partition
+                             then
+                               Get_Node_Bucket (B, A.Data (BIdx).Key)
+                               = B.Data (BIdx)
+                             else
+                               Get_Node_Bucket (B, A.Data (BIdx).Key)
+                               = B.Data (BIdx - 1))))));
+      pragma
+        Assert
+          (((for all BIdx in Bucket_Data_Idx'First .. Bucket_Data_Idx (A.Size)
+             => (if A.Data (BIdx).Key /= Key
+                 then
+                   Contains_Key_Bucket (B, A.Data (BIdx).Key)
+                   and then Get_Node_Bucket (B, A.Data (BIdx).Key)
+                            = A.Data (BIdx)))));
    end Lemma_Key_Set_Minus;
 
    procedure Delete_Key_Bucket (B : in out Bucket; Key : K)
    with
-     Pre  => Contains_Key_Bucket (B, Key) and then Unique_Keys (B),
+     Pre  => Unique_Keys (B) and then Contains_Key_Bucket (B, Key),
      Post =>
-       not Contains_Key_Bucket (B, Key)
-       and then Unique_Keys (B)
+       Unique_Keys (B)
+       and then (not Contains_Key_Bucket (B, Key))
        and then B.Size = B'Old.Size - 1
        and then No_Changes_Other_Than_To_Key_Bucket (B'Old, B, Key)
    is
