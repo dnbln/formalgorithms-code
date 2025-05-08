@@ -30,4 +30,28 @@ begin
    else
       Ada.Text_IO.Put_Line ("Is wrong");
    end if;
+
+   Insert (m, 2, 200);
+   Ada.Text_IO.Put_Line ("Inserted2");
+   if Get_Value (m, 2) = 200 then
+      Ada.Text_IO.Put_Line ("Is correct");
+   else
+      Ada.Text_IO.Put_Line ("Is wrong");
+   end if;
+   if Get_Value (m, 1) = 100 then
+      Ada.Text_IO.Put_Line ("Is correct");
+   else
+      Ada.Text_IO.Put_Line ("Is wrong");
+   end if;
+   Delete_Key (m, 1);
+   if Get_Value (m, 2) = 200 then
+      Ada.Text_IO.Put_Line ("Is correct");
+   else
+      Ada.Text_IO.Put_Line ("Is wrong");
+   end if;
+   if Contains_Key (m, 1) then
+      Ada.Text_IO.Put_Line ("Is wrong");
+   else
+      Ada.Text_IO.Put_Line ("Is correct");
+   end if;
 end Formalgorithms;
