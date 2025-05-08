@@ -1,2 +1,3 @@
-# hello
-"Hello, world!" using a library
+# formalgorithms
+
+BSc thesis project, support code.
