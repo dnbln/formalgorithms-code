@@ -1,5 +1,4 @@
 --  with Ada.Text_IO;   use Ada.Text_IO;
-with Lemmas.Sorted; use Lemmas.Sorted;
 
 package body qsort
   with SPARK_Mode
@@ -19,15 +18,15 @@ is
                  => (if J /= L and then K /= L then A'Old (L) = A (L)))
        and then Multiset_Unchanged (A'Old, A)
    is
-      A_Init : IArr (A'Range) := A;
+      A_Init : constant IArr (A'Range) := A;
       Temp   : Integer := A (J);
 
-      -- ghost variable
+      --  ghost variable
 
       A_After_First : IArr (A'Range)
       with Ghost;
 
-      -- ghost procedure
+      --  ghost procedure
 
       procedure Prove_Perm
       with
@@ -374,7 +373,7 @@ is
       j := A'Last;
 
       while i < j loop
-         pragma Loop_invariant (i > A'First);
+         pragma Loop_Invariant (i > A'First);
          pragma Loop_Invariant (i < A'Last);
          pragma Loop_Invariant (j > A'First);
          pragma Loop_Invariant (j <= A'Last);
