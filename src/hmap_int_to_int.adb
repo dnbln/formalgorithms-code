@@ -8,6 +8,11 @@ is
    function Bucket_Key_Is_Full (HM : Hash_Map; Key : Integer) return Boolean
    is (impl.Bucket_Key_Is_Full (impl.Hash_Map (HM), Key));
    overriding
+   function No_Changes_Other_Than_To_Key
+     (HM, HMOld : Hash_Map; Key : Integer) return Boolean
+   is (impl.No_Changes_Other_Than_To_Key
+         (impl.Hash_Map (HM), impl.Hash_Map (HMOld), Key));
+   overriding
    function Contains_Key (HM : Hash_Map; Key : Integer) return Boolean
    is (impl.Contains_Key (impl.Hash_Map (HM), Key));
    overriding

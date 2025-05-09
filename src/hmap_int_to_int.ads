@@ -9,6 +9,14 @@ is
    with Ghost;
    function Bucket_Key_Is_Full (HM : Hash_Map; Key : Integer) return Boolean;
 
+   function No_Changes_Other_Than_To_Key
+     (HM, HMOld : Hash_Map; Key : Integer) return Boolean
+   with
+     Ghost,
+     Pre =>
+       All_Buckets_Have_Unique_Keys (HM)
+       and then All_Buckets_Have_Unique_Keys (HMOld);
+
    function Contains_Key (HM : Hash_Map; Key : Integer) return Boolean
    with Pre => All_Buckets_Have_Unique_Keys (HM);
    function Make_New return Hash_Map;
@@ -17,15 +25,22 @@ is
      Pre => All_Buckets_Have_Unique_Keys (HM) and then Contains_Key (HM, Key);
    procedure Insert (HM : in out Hash_Map; Key : Integer; Value : Integer)
    with
-     Pre =>
+     Pre  =>
        All_Buckets_Have_Unique_Keys (HM)
        and then (if not Contains_Key (HM, Key)
-                 then not Bucket_Key_Is_Full (HM, Key));
+                 then not Bucket_Key_Is_Full (HM, Key)),
+     Post =>
+       All_Buckets_Have_Unique_Keys (HM)
+       and then Contains_Key (HM, Key)
+       and then Get_Value (HM, Key) = Value
+       and then No_Changes_Other_Than_To_Key (HM, HM'Old, Key);
    procedure Delete_Key (HM : in out Hash_Map; Key : Integer)
    with
      Pre  => All_Buckets_Have_Unique_Keys (HM) and then Contains_Key (HM, Key),
      Post =>
-       All_Buckets_Have_Unique_Keys (HM) and then (not Contains_Key (HM, Key));
+       All_Buckets_Have_Unique_Keys (HM)
+       and then (not Contains_Key (HM, Key))
+       and then No_Changes_Other_Than_To_Key (HM'Old, HM, Key);
 
 private
    function Integer_Identity (V : Integer) return Integer
