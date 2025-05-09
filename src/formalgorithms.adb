@@ -4,7 +4,7 @@ with Types;
 with hmap_int_to_int; use hmap_int_to_int;
 
 procedure Formalgorithms is
-   t : types.IArr := (0, 10, 45, 1, -10, -100);
+   t : Types.IArr := (0, 10, 45, 1, -10, -100);
    m : Hash_Map := Make_New;
 begin
    qsort.sort (t);

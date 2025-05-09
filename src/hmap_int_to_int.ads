@@ -40,7 +40,7 @@ is
      Post =>
        All_Buckets_Have_Unique_Keys (HM)
        and then (not Contains_Key (HM, Key))
-       and then No_Changes_Other_Than_To_Key (HM'Old, HM, Key);
+       and then No_Changes_Other_Than_To_Key (HM, HM'Old, Key);
 
 private
    function Integer_Identity (V : Integer) return Integer

@@ -136,16 +136,18 @@ package hmap with SPARK_Mode is
 
    function No_Changes_Other_Than_To_Key_Bucket
      (B, BOld : Bucket; Key : K) return Boolean
-   is ((B.Size = BOld.Size + 1 or else B.Size = BOld.Size)
-       and then (if B.Size > 0
+   is ((B.Size = BOld.Size + 1
+        or else B.Size = BOld.Size
+        or else B.Size + 1 = BOld.Size)
+       and then (if BOld.Size > 0
                  then
                    (for all BIdx
-                      in Bucket_Data_Idx'First .. Bucket_Data_Idx (B.Size)
-                    => (if B.Data (BIdx).Key /= Key
+                      in Bucket_Data_Idx'First .. Bucket_Data_Idx (BOld.Size)
+                    => (if BOld.Data (BIdx).Key /= Key
                         then
-                          Contains_Key_Bucket (BOld, B.Data (BIdx).Key)
-                          and then Get_Node_Bucket (BOld, B.Data (BIdx).Key)
-                                   = B.Data (BIdx)))))
+                          Contains_Key_Bucket (B, BOld.Data (BIdx).Key)
+                          and then Get_Node_Bucket (B, BOld.Data (BIdx).Key)
+                                   = BOld.Data (BIdx)))))
    with Ghost, Pre => Unique_Keys (BOld) and then Unique_Keys (B);
 
    function No_Changes_Other_Than_To_Key
@@ -170,7 +172,7 @@ package hmap with SPARK_Mode is
      Post =>
        All_Buckets_Have_Unique_Keys (HM)
        and then (not Contains_Key (HM, Key))
-       and then No_Changes_Other_Than_To_Key (HM'Old, HM, Key);
+       and then No_Changes_Other_Than_To_Key (HM, HM'Old, Key);
 
    function Get_Value (HM : Hash_Map; Key : K) return V
    with

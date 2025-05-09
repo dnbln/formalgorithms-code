@@ -5,7 +5,7 @@ is
    is (Contains_Key_Bucket (HM (Bucket_Key (Key)), Key));
 
    function Get_Node_Bucket (B : Bucket; Key : K) return Node is
-      Idx : Bucket_Data_Size := Contains_Key_Bucket_Index (B, Key);
+      Idx : constant Bucket_Data_Size := Contains_Key_Bucket_Index (B, Key);
    begin
       pragma Assert (Idx > 0);
       return B.Data (Bucket_Data_Idx (Idx));
@@ -175,9 +175,9 @@ is
        and then (if Contains_Key_Bucket (B'Old, Key)
                  then B.Size = B'Old.Size
                  else B.Size = B'Old.Size + 1)
-       and then No_changes_Other_Than_To_Key_Bucket (B, B'Old, Key)
+       and then No_Changes_Other_Than_To_Key_Bucket (B, B'Old, Key)
    is
-      P    : Bucket_Data_Size := Contains_Key_Bucket_Index (B, Key);
+      P    : constant Bucket_Data_Size := Contains_Key_Bucket_Index (B, Key);
       BOld : constant Bucket := B
       with Ghost;
    begin
@@ -185,13 +185,13 @@ is
          Do_Insert_Into_Bucket (B, Key, Value);
          pragma Assert (Contains_Key_Bucket (B, Key));
          pragma Assert (Get_Value_Bucket (B, Key) = Value);
-         pragma Assert (No_changes_Other_Than_To_Key_Bucket (B, BOld, Key));
+         pragma Assert (No_Changes_Other_Than_To_Key_Bucket (B, BOld, Key));
       else
          pragma Assert (P > 0);
          Replace_In_Bucket (B, Bucket_Data_Idx (P), Key, Value);
          pragma Assert (Contains_Key_Bucket (B, Key));
          pragma Assert (Get_Value_Bucket (B, Key) = Value);
-         pragma Assert (No_changes_Other_Than_To_Key_Bucket (B, BOld, Key));
+         pragma Assert (No_Changes_Other_Than_To_Key_Bucket (B, BOld, Key));
       end if;
    end Insert_Bucket;
 
@@ -231,7 +231,7 @@ is
                     => A.Data (I + 1) = B.Data (I))),
      Post =>
        (not Contains_Key_Bucket (B, Key))
-       and then No_Changes_Other_Than_To_Key_Bucket (A, B, Key)
+       and then No_Changes_Other_Than_To_Key_Bucket (B, A, Key)
    is
    begin
       pragma
@@ -293,9 +293,9 @@ is
            Assert
              (for some I in Bucket_Data_Idx'First .. Bucket_Data_Idx (B.Size)
               => (for some J in Bucket_Data_Idx'First .. I - 1
-                  => (if I < Bucket_Data_Idx (P)
+                  => (if I < P
                       then (BOld.Data (J).Key = BOld.Data (I).Key)
-                      elsif J < Bucket_Data_Idx (P)
+                      elsif J < P
                       then (BOld.Data (J).Key = BOld.Data (I + 1).Key)
                       else (BOld.Data (J + 1).Key = BOld.Data (I + 1).Key))));
          pragma Assert (not Unique_Keys (BOld));
@@ -310,9 +310,9 @@ is
        Unique_Keys (B)
        and then (not Contains_Key_Bucket (B, Key))
        and then B.Size = B'Old.Size - 1
-       and then No_Changes_Other_Than_To_Key_Bucket (B'Old, B, Key)
+       and then No_Changes_Other_Than_To_Key_Bucket (B, B'Old, Key)
    is
-      P    : Bucket_Data_Size := Contains_Key_Bucket_Index (B, Key);
+      P    : constant Bucket_Data_Size := Contains_Key_Bucket_Index (B, Key);
       BOld : constant Bucket := B
       with Ghost;
    begin
@@ -321,7 +321,7 @@ is
       if P = B.Size then
          B.Size := B.Size - 1;
          pragma Assert (Unique_Keys (B));
-         pragma Assert (No_Changes_Other_Than_To_Key_Bucket (BOld, B, Key));
+         pragma Assert (No_Changes_Other_Than_To_Key_Bucket (B, BOld, Key));
       elsif B.Size > 1 then
          pragma Assert (Unique_Keys (B));
          if P > 1 then
@@ -356,7 +356,7 @@ is
                 (for all I in Bucket_Data_Idx (P) .. Bucket_Data_Idx (B.Size)
                  => BOld.Data (I + 1) = B.Data (I));
             Lemma_Key_Set_Minus (BOld, B, Bucket_Data_Idx (P), Key);
-            pragma Assert (No_Changes_Other_Than_To_Key_Bucket (BOld, B, Key));
+            pragma Assert (No_Changes_Other_Than_To_Key_Bucket (B, BOld, Key));
          else
             pragma Assert (P = 1);
 
@@ -381,12 +381,12 @@ is
                 (for all I in Bucket_Data_Idx (P) .. Bucket_Data_Idx (B.Size)
                  => BOld.Data (I + 1) = B.Data (I));
             Lemma_Key_Set_Minus (BOld, B, Bucket_Data_Idx (P), Key);
-            pragma Assert (No_Changes_Other_Than_To_Key_Bucket (BOld, B, Key));
+            pragma Assert (No_Changes_Other_Than_To_Key_Bucket (B, BOld, Key));
          end if;
       elsif B.Size = 1 then
          B.Size := B.Size - 1;
          pragma Assert (Unique_Keys (B));
-         pragma Assert (No_Changes_Other_Than_To_Key_Bucket (BOld, B, Key));
+         pragma Assert (No_Changes_Other_Than_To_Key_Bucket (B, BOld, Key));
       end if;
    end Delete_Key_Bucket;
 
@@ -398,7 +398,7 @@ is
    begin
       Delete_Key_Bucket (B, Key);
       pragma Assert (Unique_Keys (B));
-      Other_Buckets_Unchanged (HMOld, HM, BId, Key);
+      Other_Buckets_Unchanged (HM, HMOld, BId, Key);
    end Delete_Key;
 
    function Get_Value (HM : Hash_Map; Key : K) return V
