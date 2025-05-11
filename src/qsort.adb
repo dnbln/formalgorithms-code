@@ -76,14 +76,18 @@ is
        and then (for all P in I + 1 .. A'Last => A (P) > A (I)),
      Post => Weak_Sorted (A) and then Multiset_Unchanged (A, A'Old)
    is
-      AOld      : constant IArr (A'Range) := A
+      AOld           : constant IArr (A'Range) := A
       with Ghost;
-      ALeft     : IArr renames A (A'First .. I - 1);
-      Piv       : Integer renames A (I);
-      ARight    : IArr renames A (I + 1 .. A'Last);
-      ALeftOld  : constant IArr (A'First .. I - 1) := AOld (A'First .. I - 1)
+      ALeft          : IArr renames A (A'First .. I - 1);
+      Piv            : Integer renames A (I);
+      ARight         : IArr renames A (I + 1 .. A'Last);
+      ALeftOld       : constant IArr (A'First .. I - 1) :=
+        AOld (A'First .. I - 1)
       with Ghost;
-      ARightOld : constant IArr (I + 1 .. A'Last) := AOld (I + 1 .. A'Last)
+      ARightOld      : constant IArr (I + 1 .. A'Last) :=
+        AOld (I + 1 .. A'Last)
+      with Ghost;
+      ALeftAfterSort : IArr (A'First .. I - 1)
       with Ghost;
 
       procedure Lemma1A (A : IArr; Start : Integer)
@@ -286,70 +290,76 @@ is
          if Piv < Integer'Last then
             Lemma1A (ALeft, Piv + 1);
          end if;
-         pragma Assert (Multiset_Unchanged (ALeft, ALeftOld));
-         pragma Assert (Multiset_Unchanged (ARight, ARightOld));
-         pragma Assert (ALeft = ALeftOld);
+         --  pragma Assert (Multiset_Unchanged (ALeft, ALeftOld));
+         --  pragma Assert (Multiset_Unchanged (ARight, ARightOld));
+         --  pragma Assert (ALeft = ALeftOld);
          sort (ALeft);
-         pragma Assert (Weak_Sorted (ALeft));
+         ALeftAfterSort := ALeft;
+         --  pragma Assert (Weak_Sorted (ALeft));
+         --  pragma Assert (ARight = ARightOld);
+         Equal_Implies_Multiset_Unchanged (ARight, ARightOld);
          pragma
            Assume
              (Multiset_Unchanged
                 (ALeft,
                  ALeftOld)); -- Source: Trust me bro (postcondition of sort, for some reason gnatprove cannot link it to this context)
-         pragma
-           Assume
-             (Multiset_Unchanged
-                (ARight,
-                 ARightOld)); -- Source: Trust me bro (not touched by the `sort` above)
+         --  pragma Assert (Multiset_Unchanged (ARight, ARightOld));
          if Piv < Integer'Last then
             Lemma2L (ALeft, Piv + 1);
-            pragma Assert (ALeft (I - 1) <= Piv);
+         --  pragma Assert (ALeft (I - 1) <= Piv);
          elsif Piv = Integer'Last then
             Lemma2XL (ALeft);
-            pragma Assert (ALeft (I - 1) <= Piv);
+         --  pragma Assert (ALeft (I - 1) <= Piv);
          end if;
 
-         pragma Assert (ALeft (I - 1) <= Piv);
-         pragma Assert (Multiset_Unchanged (ALeft, ALeftOld));
+      --  pragma Assert (ALeft (I - 1) <= Piv);
+      --  pragma Assert (Multiset_Unchanged (ALeft, ALeftOld));
+
       else
-         pragma Assert (Weak_Sorted (ALeft));
-         pragma Assert (Multiset_Unchanged (ALeft, ALeftOld));
+         --  pragma Assert (Weak_Sorted (ALeft));
+         --  pragma Assert (Multiset_Unchanged (ALeft, ALeftOld));
+         ALeftAfterSort := ALeft;
       end if;
-      pragma Assert (Weak_Sorted (ALeft));
-      pragma Assert (Multiset_Unchanged (ALeft, ALeftOld));
+      --  pragma Assert (Weak_Sorted (ALeft));
+      --  pragma Assert (Multiset_Unchanged (ALeft, ALeftOld));
       if I < A'Last then
          Lemma1B (ARight, Piv);
-         pragma Assert (Multiset_Unchanged (ARight, ARightOld));
-         pragma
-           Assert (for all E in Integer'First .. Piv => Occ (ARight, E) = 0);
+         --  pragma Assert (Multiset_Unchanged (ARight, ARightOld));
+         --  pragma
+         --    Assert (for all E in Integer'First .. Piv => Occ (ARight, E) = 0);
          sort (ARight);
-         pragma Assert (Weak_Sorted (ARight));
-         pragma
-           Assume
-             (Multiset_Unchanged
-                (ALeft,
-                 ALeftOld)); -- Source: Trust me bro (not touched by sort)
+         --  pragma Assert (Weak_Sorted (ARight));
+         --  pragma Assert (ALeft = ALeftAfterSort);
+         if ALeft'Length > 0 then
+            Equal_Implies_Multiset_Unchanged (ALeft, ALeftAfterSort);
+            Unchanged_Transitivity (ALeft, ALeftAfterSort, ALeftOld);
+         --  else
+         --     pragma Assert (Multiset_Unchanged (ALeft, ALeftOld));
+
+         end if;
+         --  pragma Assert (Multiset_Unchanged (ALeft, ALeftOld));
          pragma
            Assume
              (Multiset_Unchanged
                 (ARight,
                  ARightOld)); -- Source: Trust me bro (postcondition of sort, not linked by gnatprove to this context for some reason)
          Lemma5B (ARightOld, ARight, Piv);
-         pragma
-           Assert (for all E in Integer'First .. Piv => Occ (ARight, E) = 0);
+         --  pragma
+         --    Assert (for all E in Integer'First .. Piv => Occ (ARight, E) = 0);
          Lemma2R (ARight, Piv);
-         pragma Assert (Piv < ARight (I + 1));
-         pragma Assert (Weak_Sorted (ALeft));
-         pragma Assert (Piv < ARight (I + 1));
+      --  pragma Assert (Piv < ARight (I + 1));
+      --  pragma Assert (Weak_Sorted (ALeft));
+      --  pragma Assert (Piv < ARight (I + 1));
+
       end if;
-      pragma Assert (Weak_Sorted (ALeft));
-      pragma Assert (Weak_Sorted (ARight));
-      pragma Assert (Multiset_Unchanged (ALeft, ALeftOld));
-      pragma Assert (Multiset_Unchanged (ARight, ARightOld));
+      --  pragma Assert (Weak_Sorted (ALeft));
+      --  pragma Assert (Weak_Sorted (ARight));
+      --  pragma Assert (Multiset_Unchanged (ALeft, ALeftOld));
+      --  pragma Assert (Multiset_Unchanged (ARight, ARightOld));
       Lemma3 (A, I);
-      pragma Assert (Weak_Sorted (A));
+      --  pragma Assert (Weak_Sorted (A));
       Lemma4;
-      pragma Assert (Multiset_Unchanged (A, AOld));
+   --  pragma Assert (Multiset_Unchanged (A, AOld));
    end Multiset_Split_Sort;
 
    procedure sort (A : in out IArr)
