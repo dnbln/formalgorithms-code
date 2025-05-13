@@ -3,6 +3,23 @@ with Types; use Types;
 package Lemmas.Sorted
   with Ghost, SPARK_Mode
 is
+   function Remove_First (A : IArr) return IArr
+   is (A (A'First + 1 .. A'Last))
+   with
+     Pre  =>
+       A'Length > 0
+       and then A'Last > Integer'First
+       and then A'Last < Integer'Last
+       and then A'Length < Integer'Last,
+     Post =>
+       Remove_First'Result'First = A'First + 1
+       and then Remove_First'Result'First <= A'Last + 1
+       and then Remove_First'Result'Last = A'Last
+       and then Remove_First'Result'Length = A'Length - 1
+       and then Remove_First'Result'Last < Integer'Last
+       and then Remove_First'Result'Length < Integer'Last,
+     Ghost;
+
    function Remove_Last (A : IArr) return IArr
    is (A (A'First .. A'Last - 1))
    with
@@ -30,13 +47,29 @@ is
        A'Last < Integer'Last and then A'Length < Integer'Last,
      Post               => Occ_Def'Result <= A'Length,
      Subprogram_Variant => (Decreases => A'Length);
-   --  pragma Annotate (Gnatprove, Terminating, Occ_Def);
+
+   function Occ_Def_Left (A : IArr; Val : Integer) return Natural
+   is (if A'Length = 0
+       then 0
+       elsif A (A'First) = Val
+       then Occ_Def_Left (Remove_First (A), Val) + 1
+       else Occ_Def_Left (Remove_First (A), Val))
+   with
+     Pre                =>
+       A'Last < Integer'Last and then A'Length < Integer'Last,
+     Post               => Occ_Def_Left'Result <= A'Length,
+     Subprogram_Variant => (Decreases => A'Length);
 
    function Occ (A : IArr; Val : Integer) return Natural
    is (Occ_Def (A, Val))
    with
      Pre  => A'Last < Integer'Last and then A'Length < Integer'Last,
      Post => Occ'Result <= A'Length;
+
+   procedure Lemma_Occ_Left_And_Right_Eq (A : IArr; Val : Integer)
+   with
+     Pre  => A'Last < Integer'Last and then A'Length < Integer'Last,
+     Post => Occ_Def (A, Val) = Occ_Def_Left (A, Val);
 
    function Multiset_Retain_Rest
      (A : IArr; B : IArr; Val : Integer) return Boolean
@@ -145,6 +178,21 @@ is
        and then A (A'Last) = B (B'Last),
      Post              => Multiset_Unchanged (A, B);
 
+   procedure New_Element_Left_Right (A, B : IArr)
+   with
+     Global            => null,
+     Always_Terminates => True,
+     Pre               =>
+       A'Length > 0
+       and then B'Length = A'Length
+       and then A'Last < Integer'Last
+       and then A'Length < Integer'Last
+       and then B'Last < Integer'Last
+       and then B'Length < Integer'Last
+       and then Multiset_Unchanged (Remove_First (A), Remove_Last (B))
+       and then A (A'First) = B (B'Last),
+     Post              => Multiset_Unchanged (A, B);
+
    procedure Unchanged_Join (A, T, L, R : IArr)
    with
      Global            => null,
@@ -168,6 +216,39 @@ is
        and then T'First = L'First
        and then T'Last = R'Last
        and then Multiset_Unchanged (A (L'Range), T (L'Range))
+       and then Multiset_Unchanged (A (R'Range), T (R'Range)),
+     Post              => Multiset_Unchanged (A, T);
+
+   procedure Unchanged_Join_3 (A, T, L, M, R : IArr)
+   with
+     Global            => null,
+     Always_Terminates => True,
+     Pre               =>
+       A'Last < Integer'Last
+       and then A'Length < Integer'Last
+       and then T'Last < Integer'Last
+       and then L'Last < Integer'Last
+       and then L'Length < Integer'Last
+       and then M'Last < Integer'Last
+       and then M'Length < Integer'Last
+       and then R'Last < Integer'Last
+       and then R'Length < Integer'Last
+       and then T'Length < Integer'Last
+       and then A'First = L'First
+       and then L'Last <= A'Last
+       and then M'Last >= M'First
+       and then M'First <= A'Last
+       and then M'Last <= A'Last
+       and then M'First >= A'First
+       and then M'Last <= A'Last
+       and then L'Last = M'First - 1
+       and then M'Last = R'First - 1
+       and then R'First >= A'First
+       and then R'Last = A'Last
+       and then A'First = T'First
+       and then A'Last = T'Last
+       and then Multiset_Unchanged (A (L'Range), T (L'Range))
+       and then Multiset_Unchanged (A (M'Range), T (M'Range))
        and then Multiset_Unchanged (A (R'Range), T (R'Range)),
      Post              => Multiset_Unchanged (A, T);
 

@@ -34,10 +34,90 @@ is
       end if;
    end Occ_Set;
 
+   procedure Lemma_Occ_Left_And_Right_Eq (A : IArr; Val : Integer) is
+   begin
+      if A'Length <= 1 then
+         return;
+      end if;
+      Lemma_Occ_Left_And_Right_Eq (Remove_First (A), Val);
+      Lemma_Occ_Left_And_Right_Eq (Remove_Last (A), Val);
+      Lemma_Occ_Left_And_Right_Eq (Remove_First (Remove_Last (A)), Val);
+   end Lemma_Occ_Left_And_Right_Eq;
+
    procedure New_Element (A, B : IArr) is
    begin
       null;
    end New_Element;
+
+   procedure New_Element_Left_Right (A, B : IArr) is
+   begin
+      pragma
+        Assert
+          (Occ_Def_Left (Remove_First (A), A (A'First)) + 1
+             = Occ_Def_Left (A, A (A'First)));
+      pragma Assert (Multiset_Add (Remove_Last (B), B, B (B'Last)));
+      if not Multiset_Unchanged (A, B) then
+         Lemma_Occ_Left_And_Right_Eq (A, Integer'First);
+         Lemma_Occ_Left_And_Right_Eq (Remove_First (A), Integer'First);
+         for I in Integer'First + 1 .. Integer'Last loop
+            pragma
+              Loop_Invariant
+                (for all J in Integer'First .. I - 1
+                 => (Occ_Def (A, J) = Occ_Def_Left (A, J)));
+            pragma
+              Loop_Invariant
+                (for all J in Integer'First .. I - 1
+                 => (Occ_Def (Remove_First (A), J)
+                     = Occ_Def_Left (Remove_First (A), J)));
+            Lemma_Occ_Left_And_Right_Eq (A, I);
+            Lemma_Occ_Left_And_Right_Eq (Remove_First (A), I);
+         end loop;
+         pragma
+           Assert
+             (for all X in Integer => Occ_Def (A, X) = Occ_Def_Left (A, X));
+         pragma
+           Assert
+             (for all X in Integer
+              => Occ_Def (Remove_First (A), X)
+                 = Occ_Def_Left (Remove_First (A), X));
+         pragma
+           Assert
+             (for all X in Integer
+              => Occ (Remove_First (A), X) = Occ (Remove_Last (B), X));
+         pragma
+           Assert
+             (for all X in Integer
+              => Occ_Def_Left (A, X)
+                 = Occ_Def_Left (Remove_First (A), X)
+                   + (if A (A'First) = X then 1 else 0));
+         pragma
+           Assert (for all X in Integer => Occ (A, X) = Occ_Def_Left (A, X));
+         pragma
+           Assert
+             (for all X in Integer
+              => Occ (B, X)
+                 = Occ (Remove_Last (B), X)
+                   + (if B (B'Last) = X then 1 else 0));
+         pragma
+           Assert
+             (for all X in Integer
+              => Occ (Remove_Last (B), X) = Occ (Remove_First (A), X));
+         pragma Assert (for some X in Integer => Occ (A, X) /= Occ (B, X));
+         pragma
+           Assert
+             (for some X in Integer
+              => Occ_Def_Left (Remove_First (A), X)
+                 + (if A (A'First) = X then 1 else 0)
+                 /= Occ (Remove_Last (B), X)
+                    + (if B (B'Last) = X then 1 else 0));
+         pragma
+           Assert
+             (for some X in Integer
+              => Occ_Def_Left (Remove_First (A), X)
+                 /= Occ (Remove_Last (B), X));
+         pragma Assert (False);
+      end if;
+   end New_Element_Left_Right;
 
    procedure Unchanged_Transitivity (A, B, C : IArr) is
    begin
@@ -185,6 +265,14 @@ is
          pragma Assert (False);
       end if;
    end Unchanged_Join;
+
+   procedure Unchanged_Join_3 (A, T, L, M, R : IArr)
+   with Refined_Post => Multiset_Unchanged (A, T)
+   is
+   begin
+      Unchanged_Join (A (L'First .. M'Last), T (L'First .. M'Last), L, M);
+      Unchanged_Join (A, T, A (L'First .. M'Last), R);
+   end Unchanged_Join_3;
 
    procedure Weak_Sorted_To_Def (A : IArr)
    with

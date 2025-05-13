@@ -1,14 +1,16 @@
+with Types;         use Types;
+with Lemmas.Sorted; use Lemmas.Sorted;
+
 package insort
   with SPARK_Mode => On
 is
-   type Arr is array (Natural range <>) of Integer;
-
-   procedure sort (A : in out Arr)
+   procedure sort (A : in out IArr)
    with
      Pre  =>
        A'Last > 0
        and then A'First < Integer'Last
-       and then A'Last < Integer'Last,
-     Post => (for all I in A'First + 1 .. A'Last => A (I - 1) <= A (I));
+       and then A'Last < Integer'Last
+       and then A'Length < Integer'Last,
+     Post => Weak_Sorted (A) and then Multiset_Unchanged (A, A'Old);
 
 end insort;
