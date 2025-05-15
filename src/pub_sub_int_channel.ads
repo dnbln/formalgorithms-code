@@ -10,7 +10,7 @@ is
    package impl is new
      pubsub
        (M               => Integer,
-        Msg_Buffer_Size => 10,
+        Msg_Buffer_Size => 32,
         Default_Message => Default_Message);
 
    Ch : impl.Pub_Sub_Channel;
