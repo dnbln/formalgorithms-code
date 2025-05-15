@@ -193,7 +193,7 @@ is
        and then A (A'First) = B (B'Last),
      Post              => Multiset_Unchanged (A, B);
 
-   procedure Unchanged_Join (A, T, L, R : IArr)
+   procedure Unchanged_Join (A, T : IArr; I : Natural)
    with
      Global            => null,
      Always_Terminates => True,
@@ -201,25 +201,16 @@ is
        A'Last < Integer'Last
        and then A'Length < Integer'Last
        and then T'Last < Integer'Last
-       and then L'Last < Integer'Last
-       and then L'Length < Integer'Last
-       and then R'Last < Integer'Last
-       and then R'Length < Integer'Last
        and then T'Length < Integer'Last
-       and then A'First = L'First
-       and then L'Last <= A'Last
-       and then L'Last = R'First - 1
-       and then R'First >= A'First
-       and then R'Last = A'Last
+       and then I - 1 <= A'Last
+       and then I >= A'First
        and then A'First = T'First
        and then A'Last = T'Last
-       and then T'First = L'First
-       and then T'Last = R'Last
-       and then Multiset_Unchanged (A (L'Range), T (L'Range))
-       and then Multiset_Unchanged (A (R'Range), T (R'Range)),
+       and then Multiset_Unchanged (A (A'First .. I - 1), T (A'First .. I - 1))
+       and then Multiset_Unchanged (A (I .. A'Last), T (I .. A'Last)),
      Post              => Multiset_Unchanged (A, T);
 
-   procedure Unchanged_Join_3 (A, T, L, M, R : IArr)
+   procedure Unchanged_Join_3 (A, T : IArr; I, J : Natural)
    with
      Global            => null,
      Always_Terminates => True,
@@ -227,29 +218,15 @@ is
        A'Last < Integer'Last
        and then A'Length < Integer'Last
        and then T'Last < Integer'Last
-       and then L'Last < Integer'Last
-       and then L'Length < Integer'Last
-       and then M'Last < Integer'Last
-       and then M'Length < Integer'Last
-       and then R'Last < Integer'Last
-       and then R'Length < Integer'Last
        and then T'Length < Integer'Last
-       and then A'First = L'First
-       and then L'Last <= A'Last
-       and then M'Last >= M'First
-       and then M'First <= A'Last
-       and then M'Last <= A'Last
-       and then M'First >= A'First
-       and then M'Last <= A'Last
-       and then L'Last = M'First - 1
-       and then M'Last = R'First - 1
-       and then R'First >= A'First
-       and then R'Last = A'Last
+       and then A'First <= I
+       and then I < J
+       and then J <= A'Last + 1
        and then A'First = T'First
        and then A'Last = T'Last
-       and then Multiset_Unchanged (A (L'Range), T (L'Range))
-       and then Multiset_Unchanged (A (M'Range), T (M'Range))
-       and then Multiset_Unchanged (A (R'Range), T (R'Range)),
+       and then Multiset_Unchanged (A (A'First .. I - 1), T (A'First .. I - 1))
+       and then Multiset_Unchanged (A (I .. J - 1), T (I .. J - 1))
+       and then Multiset_Unchanged (A (J .. A'Last), T (J .. A'Last)),
      Post              => Multiset_Unchanged (A, T);
 
    procedure Unchanged_Transitivity (A, B, C : IArr)

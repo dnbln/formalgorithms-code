@@ -185,12 +185,11 @@ is
          Equal_Implies_Multiset_Unchanged
            (A (J + 1 .. A'Last), T (J + 1 .. A'Last));
          if I = J then
-            Unchanged_Join (A, T, A (A'First .. I - 1), A (I .. A'Last));
+            Unchanged_Join (A, T, I);
          else
             New_Element_Left_Right (A (I .. J), T (I .. J));
             pragma Assert (Multiset_Unchanged (A (I .. J), T (I .. J)));
-            Unchanged_Join_3
-              (A, T, A (A'First .. I - 1), A (I .. J), A (J + 1 .. A'Last));
+            Unchanged_Join_3 (A, T, I, J + 1);
          end if;
       end Lemma_X;
    begin

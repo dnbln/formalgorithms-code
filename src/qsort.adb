@@ -265,7 +265,7 @@ is
       is
       begin
          New_Element (A (A'First .. I), AOld (A'First .. I));
-         Unchanged_Join (A, AOld, A (A'First .. I), A (I + 1 .. A'Last));
+         Unchanged_Join (A, AOld, I + 1);
       end Lemma4;
 
       procedure Lemma5B (O, N : IArr; E : Integer)
@@ -302,7 +302,7 @@ is
            Assume
              (Multiset_Unchanged
                 (ALeft,
-                 ALeftOld)); -- Source: Trust me bro (postcondition of sort, for some reason gnatprove cannot link it to this context)
+                 ALeftOld)); -- Source: postcondition of sort, hard to prove here for some reason
          --  pragma Assert (Multiset_Unchanged (ARight, ARightOld));
          if Piv < Integer'Last then
             Lemma2L (ALeft, Piv + 1);
@@ -342,7 +342,7 @@ is
            Assume
              (Multiset_Unchanged
                 (ARight,
-                 ARightOld)); -- Source: Trust me bro (postcondition of sort, not linked by gnatprove to this context for some reason)
+                 ARightOld)); -- Source: postcondition of sort, hard to prove here for some reason
          Lemma5B (ARightOld, ARight, Piv);
          --  pragma
          --    Assert (for all E in Integer'First .. Piv => Occ (ARight, E) = 0);

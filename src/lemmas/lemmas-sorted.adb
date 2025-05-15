@@ -231,7 +231,7 @@ is
       end if;
    end Doesnt_Have_Value_To_Occ;
 
-   procedure Unchanged_Join (A, T, L, R : IArr)
+   procedure Unchanged_Join (A, T : IArr; I : Natural)
    with Refined_Post => Multiset_Unchanged (A, T)
    is
    begin
@@ -241,23 +241,27 @@ is
          --  pragma Assert (for all X in Integer => Occ(A(L'Range), X) = Occ(T(L'Range), X));
          --  pragma Assert (for all X in Integer => Occ(A(R'Range), X) = Occ(T(R'Range), X));
 
-         Occ_Join_Lemma (A, L'Last, Integer'First);
+         Occ_Join_Lemma (A, I - 1, Integer'First);
          for X in Integer'First + 1 .. Integer'Last loop
             pragma
               Loop_Invariant
                 (for all V in Integer'First .. X - 1
-                 => Occ (A, V) = Occ (A (L'Range), V) + Occ (A (R'Range), V));
-            Occ_Join_Lemma (A, L'Last, X);
+                 => Occ (A, V)
+                    = Occ (A (A'First .. I - 1), V)
+                      + Occ (A (I .. A'Last), V));
+            Occ_Join_Lemma (A, I - 1, X);
          end loop;
          --  pragma Assert (for all X in Integer => Occ(A, X) = Occ(A(L'Range), X) + Occ(A(R'Range), X));
 
-         Occ_Join_Lemma (T, L'Last, Integer'First);
+         Occ_Join_Lemma (T, I - 1, Integer'First);
          for X in Integer'First + 1 .. Integer'Last loop
             pragma
               Loop_Invariant
                 (for all V in Integer'First .. X - 1
-                 => Occ (T, V) = Occ (T (L'Range), V) + Occ (T (R'Range), V));
-            Occ_Join_Lemma (T, L'Last, X);
+                 => Occ (T, V)
+                    = Occ (T (A'First .. I - 1), V)
+                      + Occ (T (I .. A'Last), V));
+            Occ_Join_Lemma (T, I - 1, X);
          end loop;
          --  pragma Assert (for all X in Integer => Occ(T, X) = Occ(T(L'Range), X) + Occ(T(R'Range), X));
 
@@ -266,12 +270,12 @@ is
       end if;
    end Unchanged_Join;
 
-   procedure Unchanged_Join_3 (A, T, L, M, R : IArr)
+   procedure Unchanged_Join_3 (A, T : IArr; I, J : Natural)
    with Refined_Post => Multiset_Unchanged (A, T)
    is
    begin
-      Unchanged_Join (A (L'First .. M'Last), T (L'First .. M'Last), L, M);
-      Unchanged_Join (A, T, A (L'First .. M'Last), R);
+      Unchanged_Join (A (A'First .. J - 1), T (A'First .. J - 1), I);
+      Unchanged_Join (A, T, J);
    end Unchanged_Join_3;
 
    procedure Weak_Sorted_To_Def (A : IArr)
