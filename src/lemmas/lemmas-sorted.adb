@@ -278,21 +278,6 @@ is
       Unchanged_Join (A, T, J);
    end Unchanged_Join_3;
 
-   procedure Weak_Sorted_To_Def (A : IArr)
-   with
-     Refined_Post => (for all I in A'First + 1 .. A'Last => A (I - 1) <= A (I))
-   is
-   begin
-      null;
-   end Weak_Sorted_To_Def;
-
-   procedure Weak_Sorted_Subrange (A, S : IArr)
-   with Refined_Post => Weak_Sorted (A (S'Range))
-   is
-   begin
-      null;
-   end Weak_Sorted_Subrange;
-
    procedure Occ_Join_Lemma (A : IArr; P : Natural; X : Integer)
    with
      Refined_Post =>

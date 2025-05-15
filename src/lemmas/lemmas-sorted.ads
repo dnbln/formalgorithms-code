@@ -346,22 +346,6 @@ is
    is (for all I in A'First + 1 .. A'Last => A (I - 1) <= A (I))
    with Pre => A'First < Integer'Last;
 
-   procedure Weak_Sorted_To_Def (A : IArr)
-   with
-     Pre  => A'First < Integer'Last and then Weak_Sorted (A),
-     Post => (for all I in A'First + 1 .. A'Last => A (I - 1) <= A (I));
-
-   procedure Weak_Sorted_Subrange (A, S : IArr)
-   with
-     Pre  =>
-       A'First < Integer'Last
-       and then S'First >= A'First
-       and then S'Last <= A'Last
-       and then S'First < Integer'Last
-       and then A (S'Range) = S
-       and then Weak_Sorted (S),
-     Post => Weak_Sorted (A (S'Range));
-
    procedure Occ_Join_Lemma (A : IArr; P : Natural; X : Integer)
    with
      Pre  =>
