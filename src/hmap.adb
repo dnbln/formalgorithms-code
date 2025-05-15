@@ -101,6 +101,7 @@ is
        and then Get_Value_Bucket (B, Key) = Value
        and then Unique_Keys (B)
        and then No_Changes_Other_Than_To_Key_Bucket (B, B'Old, Key)
+       and then No_Changes_Other_Than_To_Key_Bucket (B'Old, B, Key)
    is
    begin
       B.Size := B.Size + 1;
@@ -129,6 +130,7 @@ is
        and then Contains_Key_Bucket (B, Key)
        and then Get_Value_Bucket (B, Key) = Value
        and then No_Changes_Other_Than_To_Key_Bucket (B, B'Old, Key)
+       and then No_Changes_Other_Than_To_Key_Bucket (B'Old, B, Key)
    is
       BOld : constant Bucket := B
       with Ghost;
@@ -176,6 +178,7 @@ is
                  then B.Size = B'Old.Size
                  else B.Size = B'Old.Size + 1)
        and then No_Changes_Other_Than_To_Key_Bucket (B, B'Old, Key)
+       and then No_Changes_Other_Than_To_Key_Bucket (B'Old, B, Key)
    is
       P    : constant Bucket_Data_Size := Contains_Key_Bucket_Index (B, Key);
       BOld : constant Bucket := B
@@ -311,6 +314,7 @@ is
        and then (not Contains_Key_Bucket (B, Key))
        and then B.Size = B'Old.Size - 1
        and then No_Changes_Other_Than_To_Key_Bucket (B, B'Old, Key)
+       and then No_Changes_Other_Than_To_Key_Bucket (B'Old, B, Key)
    is
       P    : constant Bucket_Data_Size := Contains_Key_Bucket_Index (B, Key);
       BOld : constant Bucket := B

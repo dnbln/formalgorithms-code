@@ -132,7 +132,8 @@ package hmap with SPARK_Mode is
        All_Buckets_Have_Unique_Keys (HM)
        and then Contains_Key (HM, Key)
        and then Get_Value (HM, Key) = Value
-       and then No_Changes_Other_Than_To_Key (HM, HM'Old, Key);
+       and then No_Changes_Other_Than_To_Key (HM, HM'Old, Key)
+       and then No_Changes_Other_Than_To_Key (HM'Old, HM, Key);
 
    function No_Changes_Other_Than_To_Key_Bucket
      (B, BOld : Bucket; Key : K) return Boolean
@@ -172,7 +173,8 @@ package hmap with SPARK_Mode is
      Post =>
        All_Buckets_Have_Unique_Keys (HM)
        and then (not Contains_Key (HM, Key))
-       and then No_Changes_Other_Than_To_Key (HM, HM'Old, Key);
+       and then No_Changes_Other_Than_To_Key (HM, HM'Old, Key)
+       and then No_Changes_Other_Than_To_Key (HM'Old, HM, Key);
 
    function Get_Value (HM : Hash_Map; Key : K) return V
    with
