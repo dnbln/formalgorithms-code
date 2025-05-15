@@ -183,19 +183,6 @@ package hmap with SPARK_Mode is
    function Contains_Key (HM : Hash_Map; Key : K) return Boolean
    with Pre => All_Buckets_Have_Unique_Keys (HM);
 
-   function HM_Occ_Def_Bucket (B : Bucket; Key : K) return Bucket_Data_Size
-   is (if B.Size = 0
-       then 0
-       elsif B.Data (Bucket_Data_Idx (B.Size)).Key = Key
-       then 1 + HM_Occ_Def_Bucket ((Data => B.Data, Size => B.Size - 1), Key)
-       else HM_Occ_Def_Bucket ((Data => B.Data, Size => B.Size - 1), Key))
-   with
-     Post               => HM_Occ_Def_Bucket'Result <= B.Size,
-     Subprogram_Variant => (Decreases => B.Size);
-
-   function HM_Occ (HM : Hash_Map; Key : K) return Bucket_Data_Size
-   is (HM_Occ_Def_Bucket (HM (Bucket_Key (Key)), Key));
-
 private
 
 end hmap;
