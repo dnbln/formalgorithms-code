@@ -97,25 +97,24 @@ is
      (A : IArr; sorted_to : Natural; value : Integer) return Natural
    with
      Pre  =>
-       ((A'First < Integer'Last
-         and then sorted_to > 0
-         and then sorted_to > A'First
-         and then sorted_to < (Integer'Last - 1)
-         and then sorted_to < A'Last)
-        and then ((sorted_to < Integer'Last)
-                  and then (A'First <= sorted_to + 1)
-                  and then (sorted_to < A'Last)
-                  and then (for all I in A'First + 1 .. sorted_to
-                            => A (I - 1) <= A (I)))),
+       A'First < Integer'Last
+       and then sorted_to > 0
+       and then sorted_to > A'First
+       and then sorted_to < Integer'Last - 1
+       and then sorted_to < A'Last
+       and then sorted_to < Integer'Last
+       and then A'First <= sorted_to + 1
+       and then sorted_to < A'Last
+       and then (for all I in A'First + 1 .. sorted_to => A (I - 1) <= A (I)),
      Post =>
-       (insert_point'Result >= A'First
-        and then insert_point'Result <= A'Last
-        and then insert_point'Result < Integer'Last
-        and then insert_point'Result <= sorted_to + 1
-        and then (for all I in A'First .. insert_point'Result - 1
-                  => A (I) <= value)
-        and then (for all I in insert_point'Result .. sorted_to
-                  => A (I) > value))
+       insert_point'Result >= A'First
+       and then insert_point'Result <= A'Last
+       and then insert_point'Result < Integer'Last
+       and then insert_point'Result <= sorted_to + 1
+       and then (for all I in A'First .. insert_point'Result - 1
+                 => A (I) <= value)
+       and then (for all I in insert_point'Result .. sorted_to
+                 => A (I) > value)
    is
    begin
       if A (A'First) > value then
