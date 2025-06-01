@@ -16,6 +16,7 @@ package pubsub with SPARK_Mode is
       procedure Get_V
         (Message : out M; Missed : out Natural; Sub_V : in out Version)
       with Pre => Sub_V < Version'Last;
+      procedure Clear;
 
       Msgs     : Msg_Buffer_Array := (others => Default_Message);
       Subs_1_V : Version := 0;

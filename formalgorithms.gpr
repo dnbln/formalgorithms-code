@@ -1,7 +1,7 @@
 with "config/formalgorithms_config.gpr";
 project Formalgorithms is
 
-   for Source_Dirs use ("src/", "src/lemmas/", "src/types/", "config/");
+   for Source_Dirs use ("src/", "src/lemmas/", "src/types/", "src/scheduler/", "config/");
    for Object_Dir use "obj/" & Formalgorithms_Config.Build_Profile;
    for Create_Missing_Dirs use "True";
    for Exec_Dir use "bin";

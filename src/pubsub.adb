@@ -5,11 +5,11 @@ is
       procedure Publish (Message : M) is
          NewV : Version;
       begin
-         if V < Version'Last then
-            NewV := V + 1;
-         else
-            NewV := 0;
+         if V = Version'Last then
+            Clear;
          end if;
+         pragma Assert (V < Version'Last);
+         NewV := V + 1;
          Msgs (Msg_Buffer_Index (NewV mod Version (Msg_Buffer_Size) + 1)) :=
            Message;
          V := NewV;
@@ -49,5 +49,15 @@ is
              (Msg_Buffer_Index (New_Sub_V mod Version (Msg_Buffer_Size) + 1));
          Sub_V := New_Sub_V;
       end Get_V;
+
+      procedure Clear
+        with
+          Refined_Post => V = 0
+      is
+      begin
+         Subs_1_V := 0;
+         Subs_2_V := 0;
+         V := 0;
+      end Clear;
    end Pub_Sub_Channel;
 end pubsub;
