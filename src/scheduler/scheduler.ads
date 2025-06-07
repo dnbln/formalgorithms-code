@@ -29,6 +29,8 @@ package Scheduler is
 private
    Null_Future : constant Future_Access := null;
 
+   type FD_Access is access all Interfaces.C.int;
+
    Local_Worker_Queue_Size_Total : constant Natural := 256;
    Local_Worker_Queue_Size_Half  : constant Natural :=
      Local_Worker_Queue_Size_Total / 2;
@@ -51,6 +53,7 @@ private
       Fut          : Future_Access;
       State        : Task_State := Ready;
       Blocked_Time : Time_Access := null;
+      Blocked_IO   : FD_Access := null;
    end record;
 
    type Local_Worker_Task_Info_Array is
@@ -73,11 +76,11 @@ private
       -- Pulls tasks from the global queue into the local array, enough to fill half of it
    private
       Global_TI_Array : Global_Task_Info_Array :=
-        (others => (Fut => Null_Future, State => Ready, Blocked_Time => null));
+        (others => (Fut => Null_Future, State => Ready, Blocked_Time => null, Blocked_IO => null));
       First, Last     : Natural := 0;
 
       Global_TI_B_Array : Global_Task_Info_Array :=
-        (others => (Fut => Null_Future, State => Ready, Blocked_Time => null));
+        (others => (Fut => Null_Future, State => Ready, Blocked_Time => null, Blocked_IO => null));
       Size_QB           : Natural := 0;
    end Global_Task_Queue;
 
@@ -108,8 +111,6 @@ private
    task type Worker_Task is
       entry Start (Idx : Worker_Idx);
    end Worker_Task;
-
-   type FD_Access is access all Interfaces.C.int;
 
    type Sched_Cx is record
       W_Idx      : Worker_Idx;

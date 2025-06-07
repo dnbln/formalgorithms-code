@@ -222,6 +222,15 @@ package body Scheduler is
                --     & Global_Task_Info_Idx'Image (I)
                --     & " is ready, pushed back to worker queue");
                Push_One (Global_TI_B_Array (I));
+            elsif Global_TI_Array (I).State = Blocked_IO then
+               -- If the task is blocked on IO, push it back to the worker queue
+               --  Ada.Text_IO.Put_Line
+               --    ("Task "
+               --     & Global_Task_Info_Idx'Image (I)
+               --     & " is blocked on IO, pushed back to worker queue");
+               Global_TI_B_Array (I).Blocked_IO.all;
+
+               Push_One (Global_TI_B_Array (I));
             else
                -- Otherwise, keep it in the global blocked queue buffer
                Global_TI_B_Array (K) := Global_TI_B_Array (I);
@@ -505,7 +514,11 @@ package body Scheduler is
       TI       : Task_Info;
       Finished : Boolean;
       Sch_Cx   : constant Sched_Cx_Access :=
-        new Sched_Cx'(W_Idx => W_Idx, Sched_Time => null, Sched_IO => null, Cancelled => False);
+        new Sched_Cx'
+          (W_Idx      => W_Idx,
+           Sched_Time => null,
+           Sched_IO   => null,
+           Cancelled  => False);
    begin
       loop
          --  Ada.Text_IO.Put_Line
@@ -546,6 +559,14 @@ package body Scheduler is
             --     & Worker_Idx'Image (W_Idx)
             --     & " cancelled task");
             -- drop
+            elsif Sch_Cx.Sched_IO /= null then
+               TI.State := Blocked_IO;
+               TI.Blocked_IO := Sch_Cx.Sched_IO;
+               --  Ada.Text_IO.Put_Line
+               --    ("Worker Task "
+               --     & Worker_Idx'Image (W_Idx)
+               --     & " blocked task on IO");
+               Local_Work_Task_Queues (W_Idx).Push_QB (TI);
             elsif Sch_Cx.Sched_Time /= null then
                TI.State := Blocked_Time;
                TI.Blocked_Time := Sch_Cx.Sched_Time;
@@ -591,7 +612,11 @@ package body Scheduler is
       Work_Left : Boolean := True;
    begin
       Local_Work_Task_Queues (Worker_Idx'First).Push
-        (TI => (Fut => Root, State => Ready, Blocked_Time => null));
+        (TI =>
+           (Fut          => Root,
+            State        => Ready,
+            Blocked_Time => null,
+            Blocked_IO   => null));
 
       for I in Workers'Range loop
          Workers (I).Start (I);
