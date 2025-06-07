@@ -1,5 +1,4 @@
-pragma Profile (Jorvik);
-pragma Partition_Elaboration_Policy (Sequential);
+--  pragma Profile (Jorvik);
 
 with pubsub;
 

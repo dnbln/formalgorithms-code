@@ -8,8 +8,12 @@ project Formalgorithms is
    for Main use ("formalgorithms.adb");
 
    package Compiler is
-      for Default_Switches ("Ada") use Formalgorithms_Config.Ada_Compiler_Switches & ("-gnat12");
+      for Default_Switches ("Ada") use Formalgorithms_Config.Ada_Compiler_Switches & ("-g", "-gnat12", "-gnatyg", "-gnatEb");
    end Compiler;
+
+   -- package Builder is
+   --    for Linker_Options use ("-L./pcl-1.12/pcl/.libs/");
+   -- end Builder;
 
    package Binder is
       for Switches ("Ada") use ("-Es"); --  Symbolic traceback

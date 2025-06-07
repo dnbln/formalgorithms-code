@@ -1,9 +1,15 @@
+pragma Partition_Elaboration_Policy (Concurrent);
 with qsort;
 with Ada.Text_IO;
+with Test_Coroutine;
+pragma Elaborate_All (Test_Coroutine);
 with Types;
 with hmap_int_to_int; use hmap_int_to_int;
 with pub_sub_int_channel;
-with test_pub_sub;
+--  with test_pub_sub;
+with scheduler;
+with scheduler_demo;
+pragma Elaborate_All (scheduler);
 
 procedure Formalgorithms is
    t : Types.IArr := (0, 10, 45, 1, -10, -100);
@@ -57,5 +63,7 @@ begin
       Ada.Text_IO.Put_Line ("Is correct");
    end if;
 
-   test_pub_sub.Test_Pub_Sub;
+   --  test_pub_sub.Test_Pub_Sub;
+   --  Test_Coroutine.Test_Coroutine;
+   scheduler_demo.Run_Demo;
 end Formalgorithms;
