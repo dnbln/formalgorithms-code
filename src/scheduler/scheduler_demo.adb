@@ -36,7 +36,7 @@ package body scheduler_demo is
 
          when Running =>
             -- Simulate some work being done
-            Put_Line ("Running Demo Root Future..." & Integer'Image (F.Id));
+            --  Put_Line ("Running Demo Root Future..." & Integer'Image (F.Id));
             -- Transition to Completed state
             F.State := Wait_One;
             F.Result := True;
@@ -44,9 +44,9 @@ package body scheduler_demo is
 
          when Wait_One =>
             -- Wait for a condition or event
-            Put_Line ("Demo Root Future is waiting...");
+            --  Put_Line ("Demo Root Future is waiting...");
             scheduler.Wake_In_Future
-              (Sched_Cx => Sched_Cx, Time => Ada.Calendar.Clock + 1.0);
+              (Sched_Cx => Sched_Cx, Time => Ada.Calendar.Clock + 20.0);
             F.State := Waiting;
             Finished := False;
          

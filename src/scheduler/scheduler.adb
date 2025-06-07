@@ -148,7 +148,10 @@ package body scheduler is
                loop
                   TI (I) :=
                     Global_TI_Array
-                      (Global_Task_Info_Idx (First + Natural (I)));
+                      (Global_Task_Info_Idx
+                         ((First + Natural (I) - 1)
+                          mod Global_Task_Info_Size_Total
+                          + 1));
                   Count := Count + 1;
                end loop;
 
@@ -185,9 +188,9 @@ package body scheduler is
               TI (I);
          end loop;
          Size_QB := Size_QB + Local_Worker_Queue_Size_Half;
-         --  Ada.Text_IO.Put_Line
-         --    ("Global Task Queue: Pushed QB, new Size_QB: "
-         --     & Natural'Image (Size_QB));
+      --  Ada.Text_IO.Put_Line
+      --    ("Global Task Queue: Pushed QB, new Size_QB: "
+      --     & Natural'Image (Size_QB));
       end Push_QB;
 
       procedure Process_QB is
@@ -337,11 +340,11 @@ package body scheduler is
          Size_QB := Size_QB + 1;
          QB (Local_Worker_Queue_Idx (Size_QB)) := TI;
 
-         --  Ada.Text_IO.Put_Line
-         --    ("Worker Task Queue: Pushed QB, new Size_QB: "
-         --     & Natural'Image (Size_QB)
-         --     & ", Size: "
-         --     & Natural'Image (Size));
+      --  Ada.Text_IO.Put_Line
+      --    ("Worker Task Queue: Pushed QB, new Size_QB: "
+      --     & Natural'Image (Size_QB)
+      --     & ", Size: "
+      --     & Natural'Image (Size));
       end Push_QB;
 
       procedure Process_QB is
@@ -398,9 +401,9 @@ package body scheduler is
             Size_QB := Natural (K) - 1;
          end if;
 
-         --  Ada.Text_IO.Put_Line
-         --    ("Worker Task Queue: Processed QB, new Size_QB: "
-         --     & Natural'Image (Size_QB));
+      --  Ada.Text_IO.Put_Line
+      --    ("Worker Task Queue: Processed QB, new Size_QB: "
+      --     & Natural'Image (Size_QB));
 
       --  Print_States;
       end Process_QB;

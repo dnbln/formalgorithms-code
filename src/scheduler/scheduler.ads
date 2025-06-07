@@ -34,7 +34,7 @@ private
      new Natural range 1 .. Local_Worker_Queue_Size_Total;
    Local_Worker_Queue_Idx_Half   : constant Local_Worker_Queue_Idx :=
      Local_Worker_Queue_Idx (Local_Worker_Queue_Size_Half);
-   Global_Task_Info_Size_Total   : constant Natural := 2**18; -- 262144
+   Global_Task_Info_Size_Total   : constant Natural := 2**20; -- 1M
    type Global_Task_Info_Idx is
      new Natural range 1 .. Global_Task_Info_Size_Total;
 
