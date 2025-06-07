@@ -32,7 +32,7 @@ package body scheduler is
    end Time_Image;
    protected body Global_Task_Queue is
       function Has_Work_Left return Boolean
-      is (First < Last or else First_B < Last_B);
+      is (First < Last or else Size_QB > 0);
 
       procedure Push_One (TI : Task_Info) is
       begin
@@ -40,7 +40,10 @@ package body scheduler is
          --     raise Constraint_Error
          --       with "Global Task Queue is full, cannot push more tasks";
          --  end if;
-         Global_TI_Array (Global_Task_Info_Idx ((Last mod Global_Task_Info_Size_Total) + 1)) := TI;
+         Global_TI_Array
+           (Global_Task_Info_Idx
+              ((Last mod Global_Task_Info_Size_Total) + 1)) :=
+           TI;
          Last := Last + 1;
       --  Ada.Text_IO.Put_Line
       --    ("Global Task Queue: Pushed one task, new Last index: "
@@ -55,7 +58,7 @@ package body scheduler is
          --  end if;
          for I in Local_Worker_Queue_Idx'First .. Local_Worker_Queue_Idx_Half
          loop
-            Push_One(TI (I));
+            Push_One (TI (I));
          end loop;
 
       --  Ada.Text_IO.Put_Line
@@ -166,9 +169,6 @@ package body scheduler is
       end;
 
       procedure Push_QB (TI : Local_Worker_Task_Info_Array) is
-         Count : Natural := 0;
-         P     : Natural :=
-           ((Last_B + Natural (1)) mod Global_Task_Info_Size_Total) + 1;
       begin
          --  Ada.Text_IO.Put_Line
          --    ("Global Task Queue: Pushing QB, current Last_B index: "
@@ -181,29 +181,25 @@ package body scheduler is
          --  end if;
          for I in Local_Worker_Queue_Idx'First .. Local_Worker_Queue_Idx_Half
          loop
-            P := ((Last_B + Natural (I)) mod Global_Task_Info_Size_Total) + 1;
-            Global_TI_B_Array (Global_Task_Info_Idx (P)) := TI (I);
+            Global_TI_B_Array (Global_Task_Info_Idx (Size_QB + Natural (I))) :=
+              TI (I);
          end loop;
-         Last_B := Last_B + Local_Worker_Queue_Size_Half;
-      --  Ada.Text_IO.Put_Line
-      --    ("Global Task Queue: Pushed QB "
-      --     & Natural'Image (Local_Worker_Queue_Size_Half)
-      --     & " tasks, new Last_B index: "
-      --     & Natural'Image (Last_B));
+         Size_QB := Size_QB + Local_Worker_Queue_Size_Half;
+         --  Ada.Text_IO.Put_Line
+         --    ("Global Task Queue: Pushed QB, new Size_QB: "
+         --     & Natural'Image (Size_QB));
       end Push_QB;
 
       procedure Process_QB is
-         K : Global_Task_Info_Idx;
+         K : Global_Task_Info_Idx := 1;
       begin
          --  Ada.Text_IO.Put_Line
          --    ("Processing Global Blocked Queue Buffer, current size: "
-         --     & Natural'Image (Last_B - First_B));
-         if First_B = Last_B then
+         --     & Natural'Image (Size_QB));
+         if Size_QB = 0 then
             return;
          end if;
-         K := Global_Task_Info_Idx (First_B);
-         for I
-           in Global_Task_Info_Idx (First_B) .. Global_Task_Info_Idx (Last_B)
+         for I in Global_Task_Info_Idx'First .. Global_Task_Info_Idx (Size_QB)
          loop
             --  Ada.Text_IO.Put_Line
             --    ("Processing QB task "
@@ -218,16 +214,18 @@ package body scheduler is
                -- If the task is blocked, push it back to the worker queue
                --  Ada.Text_IO.Put_Line
                --    ("Task "
-               --     & Local_Worker_Queue_Idx'Image (I)
+               --     & Global_Task_Info_Idx'Image (I)
                --     & " is ready, pushed back to worker queue");
                Push_One (Global_TI_B_Array (I));
             else
                -- Otherwise, keep it in the global blocked queue buffer
                Global_TI_B_Array (K) := Global_TI_B_Array (I);
-               K := K + 1;
+               if Natural (K) < Size_QB then
+                  K := K + 1;
+               end if;
             end if;
          end loop;
-         Last_B := Natural (K) - 1;
+         Size_QB := Natural (K) - 1;
       --  Ada.Text_IO.Put_Line
       --    ("Global Task Queue: Processed QB, new Last_B index: "
       --     & Natural'Image (Last_B));
@@ -329,7 +327,7 @@ package body scheduler is
             loop
                QB (I) := QB (Local_Worker_Queue_Idx_Half + I);
             end loop;
-            Size_QB := Size_QB / 2;
+            Size_QB := Size_QB - Local_Worker_Queue_Size_Half;
          --  Ada.Text_IO.Put_Line
          --    ("Worker Task Queue: QB pushed to global task queue, new Size_QB: "
          --     & Natural'Image (Size_QB));
@@ -338,10 +336,17 @@ package body scheduler is
 
          Size_QB := Size_QB + 1;
          QB (Local_Worker_Queue_Idx (Size_QB)) := TI;
+
+         --  Ada.Text_IO.Put_Line
+         --    ("Worker Task Queue: Pushed QB, new Size_QB: "
+         --     & Natural'Image (Size_QB)
+         --     & ", Size: "
+         --     & Natural'Image (Size));
       end Push_QB;
 
       procedure Process_QB is
-         K : Local_Worker_Queue_Idx := 1;
+         K         : Local_Worker_Queue_Idx := 1;
+         Keep_Size : Boolean := False;
       begin
          --  Ada.Text_IO.Put_Line
          --    ("Processing Blocked Queue Buffer, current size: "
@@ -377,7 +382,11 @@ package body scheduler is
             else
                -- Otherwise, push it to the global task queue
                QB (K) := QB (I);
-               K := K + 1;
+               if Natural (K) < Size_QB then
+                  K := K + 1;
+               elsif Natural (K) = Size_QB then
+                  Keep_Size := True;
+               end if;
 
                --  Ada.Text_IO.Put_Line
                --    ("Task "
@@ -385,11 +394,13 @@ package body scheduler is
                --     & " is not ready, keeping in QB");
             end if;
          end loop;
-         Size_QB := Natural (K) - 1;
+         if not Keep_Size then
+            Size_QB := Natural (K) - 1;
+         end if;
 
-      --  Ada.Text_IO.Put_Line
-      --    ("Worker Task Queue: Processed QB, new Size_QB: "
-      --     & Natural'Image (Size_QB));
+         --  Ada.Text_IO.Put_Line
+         --    ("Worker Task Queue: Processed QB, new Size_QB: "
+         --     & Natural'Image (Size_QB));
 
       --  Print_States;
       end Process_QB;

@@ -75,7 +75,7 @@ private
 
       Global_TI_B_Array : Global_Task_Info_Array :=
         (others => (Fut => Null_Future, State => Ready, Blocked_Time => null));
-      First_B, Last_B  : Natural := 0;
+      Size_QB  : Natural := 0;
    end Global_Task_Queue;
 
    protected type Worker_Task_Queue is
