@@ -22,7 +22,7 @@ package body scheduler_demo is
             -- Transition to Running state
             F.State := Running;
 
-            for I in 1 .. 100_000 loop
+            for I in 1 .. 1_000 loop
                scheduler.Spawn
                  (Sched_Cx => Sched_Cx,
                   F        =>

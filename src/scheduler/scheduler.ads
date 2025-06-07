@@ -1,6 +1,8 @@
 with Ada.Calendar;
+with Interfaces;
+with Interfaces.C;
 
-package scheduler is
+package Scheduler is
    type Sched_Cx is limited private;
    type Sched_Cx_Access is access all Sched_Cx;
 
@@ -38,11 +40,12 @@ private
    type Global_Task_Info_Idx is
      new Natural range 1 .. Global_Task_Info_Size_Total;
 
-   Worker_Count : constant Natural := 4;
+   Worker_Count : constant Natural := 8;
 
    type Time_Access is access all Ada.Calendar.Time;
 
-   type Task_State is (Ready, Running, Cancelled, Blocked_Time, Blocked_IO, Completed);
+   type Task_State is
+     (Ready, Running, Cancelled, Blocked_Time, Blocked_IO, Completed);
 
    type Task_Info is record
       Fut          : Future_Access;
@@ -62,9 +65,9 @@ private
       --  entry Pull
       --    (TI : in out Local_Worker_Task_Info_Array; Count : out Natural);
 
-      procedure Try_Pull 
+      procedure Try_Pull
         (TI : in out Local_Worker_Task_Info_Array; Count : out Natural);
-      
+
       procedure Push_QB (TI : Local_Worker_Task_Info_Array);
       procedure Process_QB;
       -- Pulls tasks from the global queue into the local array, enough to fill half of it
@@ -75,7 +78,7 @@ private
 
       Global_TI_B_Array : Global_Task_Info_Array :=
         (others => (Fut => Null_Future, State => Ready, Blocked_Time => null));
-      Size_QB  : Natural := 0;
+      Size_QB           : Natural := 0;
    end Global_Task_Queue;
 
    protected type Worker_Task_Queue is
@@ -91,12 +94,12 @@ private
 
       procedure Print_States;
    private
-      Q    : Local_Worker_Task_Info_Array;
-      Size : Natural := 0;
+      Q           : Local_Worker_Task_Info_Array;
+      Size        : Natural := 0;
       Clk_Current : Local_Worker_Queue_Idx;
-      Clk_Idx : Local_Worker_Queue_Idx;
-      QB   : Local_Worker_Task_Info_Array; -- Buffer for blocked tasks
-      Size_QB : Natural := 0;
+      Clk_Idx     : Local_Worker_Queue_Idx;
+      QB          : Local_Worker_Task_Info_Array; -- Buffer for blocked tasks
+      Size_QB     : Natural := 0;
    end Worker_Task_Queue;
 
    type Worker_Idx is new Natural range 1 .. Worker_Count;
@@ -106,9 +109,12 @@ private
       entry Start (Idx : Worker_Idx);
    end Worker_Task;
 
+   type FD_Access is access all Interfaces.C.int;
+
    type Sched_Cx is record
       W_Idx      : Worker_Idx;
       Sched_Time : Time_Access;
+      Sched_IO   : FD_Access;
       Cancelled  : Boolean := False;
    end record;
-end scheduler;
+end Scheduler;

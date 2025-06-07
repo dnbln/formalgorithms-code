@@ -2,7 +2,9 @@ with Ada.Calendar; use Ada.Calendar;
 with Ada.Exceptions;
 with Ada.Text_IO;
 
-package body scheduler is
+with Scheduler.IO;
+
+package body Scheduler is
    function Time_Image (T : Ada.Calendar.Time) return String is
       Year, Month, Day     : Integer;
       D                    : Ada.Calendar.Day_Duration;
@@ -503,7 +505,7 @@ package body scheduler is
       TI       : Task_Info;
       Finished : Boolean;
       Sch_Cx   : constant Sched_Cx_Access :=
-        new Sched_Cx'(W_Idx => W_Idx, Sched_Time => null, Cancelled => False);
+        new Sched_Cx'(W_Idx => W_Idx, Sched_Time => null, Sched_IO => null, Cancelled => False);
    begin
       loop
          --  Ada.Text_IO.Put_Line
@@ -514,6 +516,7 @@ package body scheduler is
          --  Ada.Text_IO.Put_Line
          --    ("Worker Task " & Worker_Idx'Image (W_Idx) & " processing task");
          Sch_Cx.Sched_Time := null;
+         Sch_Cx.Sched_IO := null;
          Sch_Cx.Cancelled := False;
          Workers_Busy.Set_Busy (W_Idx, True);
          TI.State := Running;
@@ -657,4 +660,4 @@ package body scheduler is
       --  For now, we just raise an exception to indicate cancellation
       Sched_Cx.Cancelled := True;
    end Cancel;
-end scheduler;
+end Scheduler;
