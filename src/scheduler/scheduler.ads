@@ -61,11 +61,21 @@ private
       -- Pushes half of the local array into the global queue
       entry Pull
         (TI : in out Local_Worker_Task_Info_Array; Count : out Natural);
+
+      procedure Try_Pull 
+        (TI : in out Local_Worker_Task_Info_Array; Count : out Natural);
+      
+      procedure Push_QB (TI : Local_Worker_Task_Info_Array);
+      procedure Process_QB;
       -- Pulls tasks from the global queue into the local array, enough to fill half of it
    private
       Global_TI_Array : Global_Task_Info_Array :=
         (others => (Fut => Null_Future, State => Ready, Blocked_Time => null));
       First, Last     : Natural := 0;
+
+      Global_TI_B_Array : Global_Task_Info_Array :=
+        (others => (Fut => Null_Future, State => Ready, Blocked_Time => null));
+      First_B, Last_B  : Natural := 0;
    end Global_Task_Queue;
 
    protected type Worker_Task_Queue is
@@ -83,6 +93,8 @@ private
    private
       Q    : Local_Worker_Task_Info_Array;
       Size : Natural := 0;
+      Clk_Current : Local_Worker_Queue_Idx;
+      Clk_Idx : Local_Worker_Queue_Idx;
       QB   : Local_Worker_Task_Info_Array; -- Buffer for blocked tasks
       Size_QB : Natural := 0;
    end Worker_Task_Queue;
