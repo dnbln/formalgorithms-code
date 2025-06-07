@@ -59,8 +59,8 @@ private
 
       procedure Push (TI : Local_Worker_Task_Info_Array);
       -- Pushes half of the local array into the global queue
-      entry Pull
-        (TI : in out Local_Worker_Task_Info_Array; Count : out Natural);
+      --  entry Pull
+      --    (TI : in out Local_Worker_Task_Info_Array; Count : out Natural);
 
       procedure Try_Pull 
         (TI : in out Local_Worker_Task_Info_Array; Count : out Natural);
