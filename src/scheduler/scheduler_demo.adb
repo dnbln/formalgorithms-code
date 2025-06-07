@@ -1,8 +1,9 @@
 with Ada.Text_IO; use Ada.Text_IO;
 with scheduler;
+with Ada.Calendar; use Ada.Calendar;
 
 package body scheduler_demo is
-   type Demo_Root_Future_State is (Initial, Running, Completed);
+   type Demo_Root_Future_State is (Initial, Running, Wait_One, Waiting, Cancelling, Wait_Again, Waiting_Again, Completed);
 
    type Demo_Root_Future is new scheduler.Future with record
       State  : Demo_Root_Future_State;
@@ -21,7 +22,7 @@ package body scheduler_demo is
             -- Transition to Running state
             F.State := Running;
 
-            for I in 1 .. 100000 loop
+            for I in 1 .. 300 loop
                scheduler.Spawn
                  (Sched_Cx => Sched_Cx,
                   F        =>
@@ -37,8 +38,49 @@ package body scheduler_demo is
             -- Simulate some work being done
             Put_Line ("Running Demo Root Future..." & Integer'Image (F.Id));
             -- Transition to Completed state
-            F.State := Completed;
+            F.State := Wait_One;
             F.Result := True;
+            Finished := False;
+
+         when Wait_One =>
+            -- Wait for a condition or event
+            Put_Line ("Demo Root Future is waiting...");
+            scheduler.Wake_In_Future
+              (Sched_Cx => Sched_Cx, Time => Ada.Calendar.Clock + 1.0);
+            F.State := Waiting;
+            Finished := False;
+         
+         when Waiting =>
+            -- Check if the condition or event is met
+            Put_Line ("Demo Root Future finished waiting.");
+            if F.Id = 0 then
+               F.State := Wait_Again;
+               Put_Line ("Demo Root Future will wait again.");
+            else
+               F.State := Cancelling;
+            end if;
+
+            Finished := False;
+            -- Simulate condition being met after some time
+         
+         when Cancelling => 
+            -- Handle cancellation logic
+            Put_Line ("Demo Root Future is being cancelled.");
+            scheduler.Cancel (Sched_Cx);
+            Finished := False;
+         
+         when Wait_Again =>
+            -- Wait again for some condition or event
+            Put_Line ("Demo Root Future is waiting again...");
+            scheduler.Wake_In_Future
+              (Sched_Cx => Sched_Cx, Time => Ada.Calendar.Clock + 1.0);
+            F.State := Waiting_Again;
+            Finished := False;
+
+         when Waiting_Again =>
+            -- Check if the condition or event is met again
+            Put_Line ("Demo Root Future finished waiting again.");
+            F.State := Completed;
             Finished := False;
 
          when Completed =>

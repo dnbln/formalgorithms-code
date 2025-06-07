@@ -1,3 +1,5 @@
+with Ada.Calendar;
+
 package scheduler is
    type Sched_Cx is limited private;
    type Sched_Cx_Access is access all Sched_Cx;
@@ -11,6 +13,16 @@ package scheduler is
    procedure Spawn_RT (Root : Future_Access);
 
    procedure Spawn (Sched_Cx : Sched_Cx_Access; F : Future_Access);
+
+   procedure Wake_In_Future
+     (Sched_Cx : Sched_Cx_Access;
+      Time     : Ada.Calendar.Time := Ada.Calendar.Clock);
+
+   procedure Cancel (Sched_Cx : Sched_Cx_Access);
+
+   --  procedure Wake_On_IO
+   --    (Sched_Cx : Sched_Cx_Access;
+   --     File     : Ada.Streams.Root_Stream_Type'Class);
 
 private
    Null_Future : constant Future_Access := null;
@@ -28,8 +40,14 @@ private
 
    Worker_Count : constant Natural := 4;
 
+   type Time_Access is access all Ada.Calendar.Time;
+
+   type Task_State is (Ready, Running, Cancelled, Blocked_Time, Blocked_IO, Completed);
+
    type Task_Info is record
-      Fut : Future_Access;
+      Fut          : Future_Access;
+      State        : Task_State := Ready;
+      Blocked_Time : Time_Access := null;
    end record;
 
    type Local_Worker_Task_Info_Array is
@@ -46,7 +64,7 @@ private
       -- Pulls tasks from the global queue into the local array, enough to fill half of it
    private
       Global_TI_Array : Global_Task_Info_Array :=
-        (others => (Fut => Null_Future));
+        (others => (Fut => Null_Future, State => Ready, Blocked_Time => null));
       First, Last     : Natural := 0;
    end Global_Task_Queue;
 
@@ -54,12 +72,19 @@ private
       function Has_Work_Left return Boolean;
 
       procedure Push (TI : Task_Info);
+      procedure Push_QB (TI : Task_Info);
+      procedure Process_QB;
+
       procedure Pop (TI : out Task_Info);
       procedure Steal
         (TI : in out Local_Worker_Task_Info_Array; Count : out Natural);
+
+      procedure Print_States;
    private
       Q    : Local_Worker_Task_Info_Array;
       Size : Natural := 0;
+      QB   : Local_Worker_Task_Info_Array; -- Buffer for blocked tasks
+      Size_QB : Natural := 0;
    end Worker_Task_Queue;
 
    type Worker_Idx is new Natural range 1 .. Worker_Count;
@@ -70,6 +95,8 @@ private
    end Worker_Task;
 
    type Sched_Cx is record
-      W_Idx : Worker_Idx;
+      W_Idx      : Worker_Idx;
+      Sched_Time : Time_Access;
+      Cancelled  : Boolean := False;
    end record;
 end scheduler;
