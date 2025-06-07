@@ -1,12 +1,13 @@
-with Coroutines;
-pragma Elaborate_All (Coroutines);
-
-generic
-   with procedure Root_Function;
 package scheduler is
-   procedure Spawn_RT;
+   type Future is abstract tagged limited null record;
+   procedure Poll (F : in out Future; Finished : out Boolean) is abstract;
+
+   type Future_Access is access all Future'Class;
+   procedure Spawn_RT(Root: Future_Access);
 
 private
+   Null_Future : constant Future_Access := null;
+
    Local_Worker_Queue_Size_Total : constant Natural := 256;
    Local_Worker_Queue_Size_Half  : constant Natural :=
      Local_Worker_Queue_Size_Total / 2;
@@ -21,7 +22,7 @@ private
    Worker_Count : constant Natural := 2;
 
    type Task_Info is record
-      C : Coroutines.Coroutine;
+      Fut : Future_Access;
    end record;
 
    type Local_Worker_Task_Info_Array is
@@ -36,7 +37,7 @@ private
       -- Pulls tasks from the global queue into the local array, enough to fill half of it
    private
       Global_TI_Array : Global_Task_Info_Array :=
-        (others => (C => Coroutines.Null_Coroutine));
+        (others => (Fut => Null_Future));
       First, Last     : Natural := 0;
    end Global_Task_Queue;
 
@@ -56,17 +57,4 @@ private
    task type Worker_Task is
       entry Start (Idx : Worker_Idx);
    end Worker_Task;
-
-   type Worker_Task_Root_Delegate is new Coroutines.Delegate with record
-      W_Idx : Worker_Idx;
-      --  The index of the worker task
-   end record;
-   overriding
-   procedure Run (D : in out Worker_Task_Root_Delegate);
-
-   type Worker_Root_Delegate is new Coroutines.Delegate with null record;
-   type Worker_Root_Delegate_Access is access all Worker_Root_Delegate;
-
-   overriding
-   procedure Run (D : in out Worker_Root_Delegate);
 end scheduler;

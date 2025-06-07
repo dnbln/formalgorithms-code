@@ -1,10 +1,6 @@
 with Ada.Text_IO;
-with PCL;
-pragma Elaborate_All (PCL);
 
 package body scheduler is
-   pragma Linker_Options ("-L/usr/local/lib");
-
    protected body Global_Task_Queue is
       procedure Push (TI : Local_Worker_Task_Info_Array) is
          Count : Natural := 0;
@@ -109,46 +105,20 @@ package body scheduler is
       end Steal;
    end Worker_Task_Queue;
 
-   overriding
-   procedure Run (D : in out Worker_Task_Root_Delegate) is
-      TI    : Task_Info;
-      W_Idx : constant Worker_Idx := D.W_Idx;
+   procedure Run_Main_Root_Delegate (W_Idx : Worker_Idx) is
+      TI       : Task_Info;
+      Finished : Boolean;
    begin
       Ada.Text_IO.Put_Line
         ("Worker Task Root Delegate started for worker "
          & Worker_Idx'Image (W_Idx));
       loop
          Local_Work_Task_Queues (W_Idx).Pop (TI);
-         if not TI.C.Alive then
-            TI.C.Spawn;
-         end if;
-         TI.C.Switch;
-         if TI.C.Alive then
+         TI.Fut.Poll (Finished => Finished);
+         if not Finished then
             Local_Work_Task_Queues (W_Idx).Push (TI);
          end if;
       end loop;
-   end Run;
-
-   procedure Run_Main_Root_Delegate (W_Idx : Worker_Idx) is
-      Init : constant Integer := PCL.Thread_Init;
-      C_D  : access Worker_Task_Root_Delegate;
-      C_R  : Coroutines.Coroutine;
-   begin
-      if Init /= 0 then
-         Ada.Text_IO.Put_Line
-           ("Thread_Init failed with code " & Integer'Image (Init));
-         return;
-      end if;
-      Ada.Text_IO.Put_Line ("Thread_Init succeeded");
-      C_D := new Worker_Task_Root_Delegate'(W_Idx => W_Idx);
-      C_R := Coroutines.Create (Coroutines.Delegate_Access (C_D));
-      C_R.Spawn (Stack_Size => 8192);
-      Ada.Text_IO.Put_Line
-        ("[RUN] Main Root Delegate started for worker "
-         & Worker_Idx'Image (W_Idx));
-      C_R.Switch;
-
-      PCL.Thread_Cleanup;
    end Run_Main_Root_Delegate;
 
    task body Worker_Task is
@@ -167,48 +137,23 @@ package body scheduler is
         ("Worker Task " & Worker_Idx'Image (W_Idx) & " finished");
    end Worker_Task;
 
-   overriding
-   procedure Run (D : in out Worker_Root_Delegate) is
-   begin
-      Root_Function;
-   end Run;
-
-   procedure Spawn_RT is
-      Init      : constant Integer := PCL.Thread_Init;
+   procedure Spawn_RT (Root : Future_Access) is
       Workers   : array (Worker_Idx) of Worker_Task;
       TI        : Task_Info;
-      Delg      : Worker_Root_Delegate_Access := new Worker_Root_Delegate;
-      DelAccess : Coroutines.Delegate_Access;
-      Coro      : Coroutines.Coroutine;
    begin
-      if Init /= 0 then
-         Ada.Text_IO.Put_Line
-           ("Thread_Init failed with code " & Integer'Image (Init));
-         return;
-      end if;
-      --  Workers(1).Start(f);
-
-      Ada.Text_IO.Put_Line ("Thread_Init succeeded, pushing initial task");
-
-      DelAccess := Coroutines.Delegate_Access (Delg);
-      Delg := null;
-      Ada.Text_IO.Put_Line ("[RUN] Created delegate for root function");
-      Coro := Coroutines.Create (DelAccess);
-      Ada.Text_IO.Put_Line ("[RUN] Created Coroutine for root delegate");
-      TI := (C => Coro);
-      Local_Work_Task_Queues (Worker_Idx (1)).Push (TI);
-
-      Ada.Text_IO.Put_Line ("[RUN] Pushed initial task to worker 1");
-
       for I in Workers'Range loop
          Workers (I).Start (I);
       end loop;
+
+      Local_Work_Task_Queues (Worker_Idx'First).Push
+        (TI => (Fut => Root));
 
       -- Wait for all workers to complete
       loop
          null;
       end loop;
 
-      PCL.Thread_Cleanup;
+
+      --  Workers(1).Start(f);
    end Spawn_RT;
 end scheduler;
