@@ -9,9 +9,9 @@ package body Scheduler.IO.File is
    type Mod_Int is mod 2**32;
 
    function Open_Read (Path : String) return File_Access is
-      P  : Interfaces.C.Strings.chars_ptr :=
+      P       : Interfaces.C.Strings.chars_ptr :=
         Interfaces.C.Strings.New_String (Path);
-      Fd : Interfaces.C.int;
+      Fd      : Interfaces.C.int;
       FAccess : File_Access;
    begin
       Ada.Text_IO.Put_Line ("Opening file for reading: " & Path);
@@ -25,9 +25,9 @@ package body Scheduler.IO.File is
    end Open_Read;
 
    function Open_Write (Path : String) return File_Access is
-      P  : Interfaces.C.Strings.chars_ptr :=
+      P       : Interfaces.C.Strings.chars_ptr :=
         Interfaces.C.Strings.New_String (Path);
-      Fd : Interfaces.C.int;
+      Fd      : Interfaces.C.int;
       FAccess : File_Access;
    begin
       Fd :=
@@ -46,9 +46,9 @@ package body Scheduler.IO.File is
    end Open_Write;
 
    function Open_Append (Path : String) return File_Access is
-      P  : Interfaces.C.Strings.chars_ptr :=
+      P       : Interfaces.C.Strings.chars_ptr :=
         Interfaces.C.Strings.New_String (Path);
-      Fd : Interfaces.C.int;
+      Fd      : Interfaces.C.int;
       FAccess : File_Access;
    begin
       Fd :=
@@ -90,6 +90,11 @@ package body Scheduler.IO.File is
       if Bytes_Read < 0 then
          raise Program_Error with "Failed to read from file";
       else
+         --  Ada.Text_IO.Put_Line
+         --    ("Read "
+         --     & sys_utypes_ussize_t_h.ssize_t'Image (Bytes_Read)
+         --     & " bytes from file with FD: "
+         --     & Interfaces.C.int'Image (Fd));
          Count := Natural (Bytes_Read);
       end if;
    end Read;

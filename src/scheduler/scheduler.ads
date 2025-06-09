@@ -41,6 +41,11 @@ private
       Events : Poll_Result_Buffer; -- Array of events
    end record;
 
+   type Tick_Info is record
+      Current : Natural; -- Current tick index
+      Count   : Natural; -- Number of tasks in ready queue
+   end record;
+
    Local_Worker_Queue_Size_Total : constant Natural := 256;
    Local_Worker_Queue_Size_Half  : constant Natural :=
      Local_Worker_Queue_Size_Total / 2;
@@ -52,7 +57,7 @@ private
    type Global_Task_Info_Idx is
      new Natural range 1 .. Global_Task_Info_Size_Total;
 
-   Worker_Count : constant Natural := 8;
+   Worker_Count : constant Natural := 4;
 
    type Time_Access is access all Ada.Calendar.Time;
 
@@ -136,23 +141,25 @@ private
 
    protected type Worker_Task_Queue is
       function Has_Work_Left return Boolean;
+      function Make_Tick_Info return Tick_Info;
 
       procedure Push (TI : Task_Info);
       procedure Push_QB (TI : Task_Info);
       procedure Process_QB;
+      procedure Flush_Blocked;
+      procedure Attempt_Enqueue_From_Global (Count : out Natural);
 
-      procedure Pop (TI : out Task_Info);
+      procedure Update_Tick_Task (TI : Task_Info; Tick : Tick_Info);
+      procedure Next_Task (TI : out Task_Info; Tick : in out Tick_Info);
       procedure Steal
         (TI : in out Local_Worker_Task_Info_Array; Count : out Natural);
 
       procedure Print_States;
    private
-      Q           : Local_Worker_Task_Info_Array;
-      Size        : Natural := 0;
-      Clk_Current : Local_Worker_Queue_Idx;
-      Clk_Idx     : Local_Worker_Queue_Idx;
-      QB          : Local_Worker_Task_Info_Array; -- Buffer for blocked tasks
-      Size_QB     : Natural := 0;
+      Q       : Local_Worker_Task_Info_Array;
+      Size    : Natural := 0;
+      QB      : Local_Worker_Task_Info_Array; -- Buffer for blocked tasks
+      Size_QB : Natural := 0;
 
       IO_Q : IO_Blocked_Queue_Access := null;
    end Worker_Task_Queue;

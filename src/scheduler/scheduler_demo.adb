@@ -28,7 +28,7 @@ package body scheduler_demo is
             F.Fi :=
               Scheduler.IO.File.Open_Read
                 (Path =>
-                   ("example" & Trim (Natural'Image (F.Id), Both) & ".txt"));
+                   ("examplex" & Trim (Natural'Image (F.Id), Both) & ".txt"));
             F.State := Waiting;
             Finished := False;
 
@@ -39,7 +39,7 @@ package body scheduler_demo is
             --  Put_Line ("FileReadFuture is waiting for file read operation...");
 
             declare
-               Buffer : Scheduler.Bytes (1 .. 1024);
+               Buffer : Scheduler.Bytes (1 .. 8192);
                Count  : Natural;
             begin
                Scheduler.IO.File.Read
@@ -87,13 +87,13 @@ package body scheduler_demo is
             -- Transition to Running state
             F.State := Running;
 
-            for I in 0 .. 9 loop
+            for I in 0 .. 10000 loop
                -- Spawn multiple FileReadFuture tasks
                Scheduler.Spawn
                  (Sched_Cx => Sched_Cx,
                   F        =>
                     new FileReadFuture'
-                      (State => Initial, Id => I, Fi => null));
+                      (State => Initial, Id => I mod 10, Fi => null));
             end loop;
             Finished := False;
             Put_Line

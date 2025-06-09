@@ -31,7 +31,7 @@ package body Scheduler_Demo_Timers is
             -- Transition to Running state
             F.State := Running;
 
-            for I in 1 .. 1_000 loop
+            for I in 1 .. 10_000 loop
                scheduler.Spawn
                  (Sched_Cx => Sched_Cx,
                   F        =>

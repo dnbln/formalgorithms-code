@@ -1,9 +1,9 @@
-with Ada.Calendar; use Ada.Calendar;
+with Ada.Calendar;            use Ada.Calendar;
 with Ada.Exceptions;
 with Ada.Text_IO;
 with scheduler_io_h;
 with sys_utypes_uuintptr_t_h; use sys_utypes_uuintptr_t_h;
-with Interfaces.C; use Interfaces.C;
+with Interfaces.C;            use Interfaces.C;
 
 package body Scheduler is
    function Time_Image (T : Ada.Calendar.Time) return String is
@@ -58,8 +58,8 @@ package body Scheduler is
       then
          return True;
       elsif TI.State = Blocked_IO then
-         for I in 1..Poll_R.Count loop
-            if Poll_R.Events (I).ident = unsigned_long(TI.Blocked_IO.FD) then
+         for I in 1 .. Poll_R.Count loop
+            if Poll_R.Events (I).ident = unsigned_long (TI.Blocked_IO.FD) then
                --  If the task is blocked on IO and the event is ready, return True
                return True;
             end if;
@@ -136,6 +136,21 @@ package body Scheduler is
       --     & Natural'Image (Last));
       end Push_One;
 
+      procedure Push_QB_One (TI : Task_Info) is
+      begin
+         --  Ada.Text_IO.Put_Line
+         --    ("Global Task Queue: Pushing one task to QB, current Size_QB: "
+         --     & Natural'Image (Size_QB));
+         if Size_QB = Global_Task_Info_Size_Total then
+            raise Constraint_Error
+              with "Global Task Queue is full, cannot push more tasks";
+         end if;
+
+         Size_QB := Size_QB + 1;
+         Global_TI_B_Array (Global_Task_Info_Idx (Size_QB)) := TI;
+         Add_Block_To_IO_Blocked_Queue (KQ => IO_Q, TI => TI);
+      end Push_QB_One;
+
       procedure Push (TI : Local_Worker_Task_Info_Array) is
       begin
          --  if P = First then
@@ -144,7 +159,11 @@ package body Scheduler is
          --  end if;
          for I in Local_Worker_Queue_Idx'First .. Local_Worker_Queue_Idx_Half
          loop
-            Push_One (TI (I));
+            if TI (I).State = Ready then
+               Push_One (TI (I));
+            else
+               Push_QB_One (TI (I));
+            end if;
          end loop;
 
       --  Ada.Text_IO.Put_Line
@@ -343,6 +362,10 @@ package body Scheduler is
    protected body Worker_Task_Queue is
       function Has_Work_Left return Boolean
       is (Size > 0 or Size_QB > 0);
+
+      function Make_Tick_Info return Tick_Info
+      is ((Current => 0, Count => Size));
+
       procedure Push (TI : Task_Info) is
       begin
          pragma Assert (TI.State = Ready);
@@ -366,7 +389,23 @@ package body Scheduler is
          Q (Local_Worker_Queue_Idx (Size)) := TI;
 
       end Push;
-      procedure Pop (TI : out Task_Info) is
+
+      procedure Update_Tick_Task (TI : Task_Info; Tick : Tick_Info) is
+      begin
+         Q (Local_Worker_Queue_Idx (Tick.Current)) := TI;
+      end Update_Tick_Task;
+
+      procedure Attempt_Enqueue_From_Global (Count : out Natural) is
+      begin
+         if Size /= 0 then
+            raise Program_Error
+              with "Worker Task Queue is not empty, cannot enqueue from global queue";
+         end if;
+         Global_Task_Queue.Try_Pull (Q, Size);
+         Count := Size;
+      end Attempt_Enqueue_From_Global;
+
+      procedure Next_Task (TI : out Task_Info; Tick : in out Tick_Info) is
       begin
          --  Ada.Text_IO.Put_Line
          --    ("Worker Task Queue: Popping task, current Size: "
@@ -374,8 +413,8 @@ package body Scheduler is
          --     & ", Size_QB: "
          --     & Natural'Image (Size_QB));
          if Size > 0 then
-            TI := Q (Local_Worker_Queue_Idx (Size));
-            Size := Size - 1;
+            Tick.Current := Tick.Current + 1;
+            TI := Q (Local_Worker_Queue_Idx (Tick.Current));
          --  elsif Global_Task_Queue.Has_Work_Left then
          --     Global_Task_Queue.Pull (TI => Q, Count => Size);
          --     TI := Q (Local_Worker_Queue_Idx (Size));
@@ -384,36 +423,8 @@ package body Scheduler is
          --    ("Worker Task Queue: Pop from global queue, new Size: "
          --     & Natural'Image (Size));
 
-         else
-            --  Ada.Text_IO.Put_Line
-            --    ("Worker Task Queue: No tasks to pop, waiting for work");
-            loop
-               Process_QB;
-               --  Print_States;
-               --  Ada.Text_IO.Put_Line
-               --    ("Worker Task Queue: Waiting for tasks, current Size: "
-               --     & Natural'Image (Size)
-               --     & ", Size_QB: "
-               --     & Natural'Image (Size_QB)
-               --     & " (after processing QB)");
-               if Size > 0 then
-                  TI := Q (Local_Worker_Queue_Idx (Size));
-                  Size := Size - 1;
-                  exit;
-               else
-                  --  Ada.Text_IO.Put_Line
-                  --    ("Worker Task Queue: No tasks available, trying to pull from global queue");
-                  Global_Task_Queue.Try_Pull (TI => Q, Count => Size);
-                  if Size > 0 then
-                     TI := Q (Local_Worker_Queue_Idx (Size));
-                     Size := Size - 1;
-                     exit;
-                  end if;
-               end if;
-               --  delay 0.01; -- Yield to allow other tasks to run
-            end loop;
          end if;
-      end Pop;
+      end Next_Task;
 
       procedure Push_QB (TI : Task_Info) is
       begin
@@ -466,6 +477,24 @@ package body Scheduler is
          Poll_R := Poll_IO_Blocked_Queue (KQ => IO_Q);
       end Poll_IO;
 
+      procedure Flush_Blocked is
+         K : Natural := 0;
+      begin
+         if Size = 0 then
+            return;
+         end if;
+         for I in Local_Worker_Queue_Idx'First .. Local_Worker_Queue_Idx (Size)
+         loop
+            if Q (I).State = Blocked_Time or else Q (I).State = Blocked_IO then
+               Push_QB (Q (I));
+            elsif Q (I).State = Ready then
+               K := K + 1;
+               Q (Local_Worker_Queue_Idx (K)) := Q (I);
+            end if;
+         end loop;
+         Size := K;
+      end Flush_Blocked;
+
       procedure Process_QB is
          K         : Local_Worker_Queue_Idx := 1;
          Keep_Size : Boolean := False;
@@ -477,7 +506,7 @@ package body Scheduler is
          if Size_QB = 0 then
             return;
          end if;
-         Poll_IO(Poll_R => Poll_R);
+         Poll_IO (Poll_R => Poll_R);
          for I
            in Local_Worker_Queue_Idx'First .. Local_Worker_Queue_Idx (Size_QB)
          loop
@@ -556,33 +585,39 @@ package body Scheduler is
 
       procedure Print_States is
       begin
-         Ada.Text_IO.Put_Line ("Worker Task Queue States");
+         if Size > 0 then
+            Ada.Text_IO.Put_Line ("Worker Task Queue States");
 
-         for I in Local_Worker_Queue_Idx'First .. Local_Worker_Queue_Idx (Size)
-         loop
-            Ada.Text_IO.Put_Line
-              ("Task "
-               & Local_Worker_Queue_Idx'Image (I)
-               & ": State = "
-               & Task_State'Image (Q (I).State));
-         end loop;
-
-         Ada.Text_IO.Put_Line ("Blocked Queue Buffer States");
-         for I
-           in Local_Worker_Queue_Idx'First .. Local_Worker_Queue_Idx (Size_QB)
-         loop
-            Ada.Text_IO.Put_Line
-              ("QB Task "
-               & Local_Worker_Queue_Idx'Image (I)
-               & ": State = "
-               & Task_State'Image (QB (I).State));
-            if QB (I).Blocked_Time /= null then
+            for I
+              in Local_Worker_Queue_Idx'First .. Local_Worker_Queue_Idx (Size)
+            loop
                Ada.Text_IO.Put_Line
-                 ("Blocked Time: " & Time_Image (QB (I).Blocked_Time.all));
-            else
-               Ada.Text_IO.Put_Line ("Blocked Time: null");
-            end if;
-         end loop;
+                 ("Task "
+                  & Local_Worker_Queue_Idx'Image (I)
+                  & ": State = "
+                  & Task_State'Image (Q (I).State));
+            end loop;
+         end if;
+
+         if Size_QB > 0 then
+            Ada.Text_IO.Put_Line ("Blocked Queue Buffer States");
+            for I
+              in Local_Worker_Queue_Idx'First
+                 .. Local_Worker_Queue_Idx (Size_QB)
+            loop
+               Ada.Text_IO.Put_Line
+                 ("QB Task "
+                  & Local_Worker_Queue_Idx'Image (I)
+                  & ": State = "
+                  & Task_State'Image (QB (I).State));
+               if QB (I).Blocked_Time /= null then
+                  Ada.Text_IO.Put_Line
+                    ("Blocked Time: " & Time_Image (QB (I).Blocked_Time.all));
+               else
+                  Ada.Text_IO.Put_Line ("Blocked Time: null");
+               end if;
+            end loop;
+         end if;
 
          Ada.Text_IO.Put_Line
            ("Total tasks in queue: "
@@ -618,6 +653,25 @@ package body Scheduler is
       end Set_Busy;
    end Workers_Busy;
 
+   function Tick_Has_More_Work (Tick : Tick_Info) return Boolean
+   is (Tick.Current < Tick.Count);
+
+   procedure Enqueue_Work_From_Other_Queues (W_Idx : Worker_Idx) is
+      Count : Natural := 0;
+   begin
+      Local_Work_Task_Queues (W_Idx).Attempt_Enqueue_From_Global
+        (Count => Count);
+      if Count > 0 then
+         Ada.Text_IO.Put_Line
+           ("Worker Task "
+            & Worker_Idx'Image (W_Idx)
+            & " enqueued "
+            & Natural'Image (Count)
+            & " tasks from global queue");
+         return;
+      end if;
+   end Enqueue_Work_From_Other_Queues;
+
    procedure Run_Main_Root_Delegate (W_Idx : Worker_Idx) is
       TI       : Task_Info;
       Finished : Boolean;
@@ -627,67 +681,79 @@ package body Scheduler is
            Sched_Time => null,
            Sched_IO   => null,
            Cancelled  => False);
+      Tick     : Tick_Info;
    begin
       loop
-         --  Ada.Text_IO.Put_Line
-         --    ("Worker Task " & Worker_Idx'Image (W_Idx) & " waiting for task");
          Local_Work_Task_Queues (W_Idx).Process_QB;
-         Local_Work_Task_Queues (W_Idx).Pop (TI);
-         --  Local_Work_Task_Queues (W_Idx).Print_States;
-         --  Ada.Text_IO.Put_Line
-         --    ("Worker Task " & Worker_Idx'Image (W_Idx) & " processing task");
-         Sch_Cx.Sched_Time := null;
-         Sch_Cx.Sched_IO := null;
-         Sch_Cx.Cancelled := False;
-         Workers_Busy.Set_Busy (W_Idx, True);
-         TI.State := Running;
-         begin
-            TI.Fut.Poll (Sched_Cx => Sch_Cx, Finished => Finished);
-         exception
-            when E : others =>
-               --  Handle any exceptions that may occur during polling
-               Finished := True;
-               TI.State := Cancelled;
+         Tick := Local_Work_Task_Queues (W_Idx).Make_Tick_Info;
 
-               Ada.Text_IO.Put_Line
-                 ("Worker Task "
-                  & Worker_Idx'Image (W_Idx)
-                  & " encountered an error: "
-                  & Ada.Exceptions.Exception_Information (E));
-         end;
-         Workers_Busy.Set_Busy (W_Idx, False);
-         --  Ada.Text_IO.Put_Line(if Sch_Cx.Sched_Time /= null then Time_Image (Sch_Cx.Sched_Time.all) else "No scheduled time");
-         --  Ada.Text_IO.Put_Line(Boolean'Image(Sch_Cx.Cancelled));
+         if not Tick_Has_More_Work (Tick) then
+            Enqueue_Work_From_Other_Queues (W_Idx => W_Idx);
+         else
+            while Tick_Has_More_Work (Tick) loop
+               --  Ada.Text_IO.Put_Line
+               --    ("Worker Task " & Worker_Idx'Image (W_Idx) & " waiting for task");
+               Local_Work_Task_Queues (W_Idx).Next_Task (TI, Tick);
+               --  Local_Work_Task_Queues (W_Idx).Print_States;
+               if W_Idx /= 1 then
+                  Ada.Text_IO.Put_Line
+                    ("Worker Task "
+                     & Worker_Idx'Image (W_Idx)
+                     & " processing task");
+               end if;
+               Sch_Cx.Sched_Time := null;
+               Sch_Cx.Sched_IO := null;
+               Sch_Cx.Cancelled := False;
+               Workers_Busy.Set_Busy (W_Idx, True);
+               TI.State := Running;
+               begin
+                  TI.Fut.Poll (Sched_Cx => Sch_Cx, Finished => Finished);
+               exception
+                  when E : others =>
+                     --  Handle any exceptions that may occur during polling
+                     Finished := True;
+                     TI.State := Cancelled;
 
-         if not Finished then
-            if Sch_Cx.Cancelled then
-               TI.State := Cancelled;
-            --  Ada.Text_IO.Put_Line
-            --    ("Worker Task "
-            --     & Worker_Idx'Image (W_Idx)
-            --     & " cancelled task");
-            -- drop
-            elsif Sch_Cx.Sched_IO /= null then
-               TI.State := Blocked_IO;
-               TI.Blocked_IO := Sch_Cx.Sched_IO;
+                     Ada.Text_IO.Put_Line
+                       ("Worker Task "
+                        & Worker_Idx'Image (W_Idx)
+                        & " encountered an error: "
+                        & Ada.Exceptions.Exception_Information (E));
+               end;
+               Workers_Busy.Set_Busy (W_Idx, False);
+               --  Ada.Text_IO.Put_Line(if Sch_Cx.Sched_Time /= null then Time_Image (Sch_Cx.Sched_Time.all) else "No scheduled time");
+               --  Ada.Text_IO.Put_Line(Boolean'Image(Sch_Cx.Cancelled));
+
+               if Finished then
+                  TI.State := Completed;
+               elsif Sch_Cx.Cancelled then
+                  TI.State := Cancelled;
+               --  Ada.Text_IO.Put_Line
+               --    ("Worker Task "
+               --     & Worker_Idx'Image (W_Idx)
+               --     & " cancelled task");
+               -- drop
+               elsif Sch_Cx.Sched_IO /= null then
+                  TI.State := Blocked_IO;
+                  TI.Blocked_IO := Sch_Cx.Sched_IO;
                --  Ada.Text_IO.Put_Line
                --    ("Worker Task "
                --     & Worker_Idx'Image (W_Idx)
                --     & " blocked task on IO");
-               Local_Work_Task_Queues (W_Idx).Push_QB (TI);
-            elsif Sch_Cx.Sched_Time /= null then
-               TI.State := Blocked_Time;
-               TI.Blocked_Time := Sch_Cx.Sched_Time;
-               Local_Work_Task_Queues (W_Idx).Push_QB (TI);
-            --  Ada.Text_IO.Put_Line
-            --    ("Worker Task "
-            --     & Worker_Idx'Image (W_Idx)
-            --     & " blocked task until "
-            --     & Time_Image (Sch_Cx.Sched_Time.all));
-            else
-               TI.State := Ready;
-               Local_Work_Task_Queues (W_Idx).Push (TI);
-            end if;
+               elsif Sch_Cx.Sched_Time /= null then
+                  TI.State := Blocked_Time;
+                  TI.Blocked_Time := Sch_Cx.Sched_Time;
+               --  Ada.Text_IO.Put_Line
+               --    ("Worker Task "
+               --     & Worker_Idx'Image (W_Idx)
+               --     & " blocked task until "
+               --     & Time_Image (Sch_Cx.Sched_Time.all));
+               else
+                  TI.State := Ready;
+               end if;
+               Local_Work_Task_Queues (W_Idx).Update_Tick_Task (TI, Tick);
+            end loop;
+            Local_Work_Task_Queues (W_Idx).Flush_Blocked;
          end if;
       end loop;
    end Run_Main_Root_Delegate;
