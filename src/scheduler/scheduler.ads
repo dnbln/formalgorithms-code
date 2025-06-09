@@ -41,8 +41,6 @@ private
       Events : Poll_Result_Buffer; -- Array of events
    end record;
 
-   type FD_Access is access all Interfaces.C.int;
-
    Local_Worker_Queue_Size_Total : constant Natural := 256;
    Local_Worker_Queue_Size_Half  : constant Natural :=
      Local_Worker_Queue_Size_Total / 2;
@@ -72,12 +70,20 @@ private
 
    function Get_Next_Task_Id return Task_Id;
 
+   type Blocked_IO_Type is (Read, Write);
+
+   type Blocked_IO_Info is record
+      FD : Interfaces.C.int; -- File descriptor for the blocked IO
+      Blocked_Type: Blocked_IO_Type;
+   end record;
+
+   type Blocked_IO_Info_Access is access all Blocked_IO_Info;
    type Task_Info is record
       Fut          : Future_Access;
       T_Id         : Task_Id;
       State        : Task_State := Ready;
       Blocked_Time : Time_Access := null;
-      Blocked_IO   : FD_Access := null;
+      Blocked_IO   : Blocked_IO_Info_Access := null;
    end record;
 
    type IO_Blocked_Queue is record
@@ -159,7 +165,7 @@ private
    type Sched_Cx is record
       W_Idx      : Worker_Idx;
       Sched_Time : Time_Access;
-      Sched_IO   : FD_Access;
+      Sched_IO   : Blocked_IO_Info_Access;
       Cancelled  : Boolean := False;
    end record;
 
@@ -180,6 +186,9 @@ private
    function Poll_IO_Blocked_Queue
      (KQ : IO_Blocked_Queue_Access) return Poll_Results;
 
-   procedure Wake_On_IO
+   procedure Wake_On_IO_Read
+     (Sched_Cx : Scheduler.Sched_Cx_Access; File : Interfaces.C.int);
+
+   procedure Wake_On_IO_Write
      (Sched_Cx : Scheduler.Sched_Cx_Access; File : Interfaces.C.int);
 end Scheduler;

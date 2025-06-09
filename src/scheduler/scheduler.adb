@@ -767,18 +767,26 @@ package body Scheduler is
           (KQ.KQueue,
            Events'Address,
            Interfaces.C.int (Poll_Result_Buffer'Length));
-      --  Ada.Text_IO.Put_Line
-      --    ("Scheduler: Polling IO blocked queue, number of events: "
-      --     & Integer'Image (Integer (Num_Events)));
       if Integer (Num_Events) < 0 then
          raise Program_Error with "Error polling IO blocked queue";
       end if;
+      --  Ada.Text_IO.Put_Line
+      --    ("Scheduler: Polling IO blocked queue, number of events: "
+      --     & Integer'Image (Integer (Num_Events)));
       return (Events => Events, Count => Integer (Num_Events));
    end Poll_IO_Blocked_Queue;
 
-   procedure Wake_On_IO
+   procedure Wake_On_IO_Read
      (Sched_Cx : Scheduler.Sched_Cx_Access; File : Interfaces.C.int) is
    begin
-      Sched_Cx.Sched_IO := new Interfaces.C.int'(File);
-   end Wake_On_IO;
+      Sched_Cx.Sched_IO :=
+        new Blocked_IO_Info'(FD => File, Blocked_Type => Read);
+   end Wake_On_IO_Read;
+
+   procedure Wake_On_IO_Write
+     (Sched_Cx : Scheduler.Sched_Cx_Access; File : Interfaces.C.int) is
+   begin
+      Sched_Cx.Sched_IO :=
+        new Blocked_IO_Info'(FD => File, Blocked_Type => Write);
+   end Wake_On_IO_Write;
 end Scheduler;
