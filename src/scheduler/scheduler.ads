@@ -139,9 +139,9 @@ private
 
       procedure Push (TI : Task_Info);
       procedure Push_QB (TI : Task_Info);
-      procedure Process_QB (Poll_R : Poll_Results);
+      procedure Process_QB;
 
-      procedure Pop (TI : out Task_Info; Poll_R : Poll_Results);
+      procedure Pop (TI : out Task_Info);
       procedure Steal
         (TI : in out Local_Worker_Task_Info_Array; Count : out Natural);
 

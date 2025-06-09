@@ -2,6 +2,8 @@ with Ada.Calendar; use Ada.Calendar;
 with Ada.Exceptions;
 with Ada.Text_IO;
 with scheduler_io_h;
+with sys_utypes_uuintptr_t_h; use sys_utypes_uuintptr_t_h;
+with Interfaces.C; use Interfaces.C;
 
 package body Scheduler is
    function Time_Image (T : Ada.Calendar.Time) return String is
@@ -56,6 +58,12 @@ package body Scheduler is
       then
          return True;
       elsif TI.State = Blocked_IO then
+         for I in 1..Poll_R.Count loop
+            if Poll_R.Events (I).ident = unsigned_long(TI.Blocked_IO.FD) then
+               --  If the task is blocked on IO and the event is ready, return True
+               return True;
+            end if;
+         end loop;
          return False;
       else
          return False;
@@ -358,7 +366,7 @@ package body Scheduler is
          Q (Local_Worker_Queue_Idx (Size)) := TI;
 
       end Push;
-      procedure Pop (TI : out Task_Info; Poll_R : Poll_Results) is
+      procedure Pop (TI : out Task_Info) is
       begin
          --  Ada.Text_IO.Put_Line
          --    ("Worker Task Queue: Popping task, current Size: "
@@ -380,7 +388,7 @@ package body Scheduler is
             --  Ada.Text_IO.Put_Line
             --    ("Worker Task Queue: No tasks to pop, waiting for work");
             loop
-               Process_QB (Poll_R => Poll_R);
+               Process_QB;
                --  Print_States;
                --  Ada.Text_IO.Put_Line
                --    ("Worker Task Queue: Waiting for tasks, current Size: "
@@ -449,9 +457,19 @@ package body Scheduler is
       --     & Natural'Image (Size));
       end Push_QB;
 
-      procedure Process_QB (Poll_R : Poll_Results) is
+      procedure Poll_IO (Poll_R : out Poll_Results) is
+      begin
+         if IO_Q = null then
+            Poll_R := (Events => (others => <>), Count => 0);
+            return;
+         end if;
+         Poll_R := Poll_IO_Blocked_Queue (KQ => IO_Q);
+      end Poll_IO;
+
+      procedure Process_QB is
          K         : Local_Worker_Queue_Idx := 1;
          Keep_Size : Boolean := False;
+         Poll_R    : Poll_Results;
       begin
          --  Ada.Text_IO.Put_Line
          --    ("Processing Blocked Queue Buffer, current size: "
@@ -459,6 +477,7 @@ package body Scheduler is
          if Size_QB = 0 then
             return;
          end if;
+         Poll_IO(Poll_R => Poll_R);
          for I
            in Local_Worker_Queue_Idx'First .. Local_Worker_Queue_Idx (Size_QB)
          loop
@@ -608,15 +627,12 @@ package body Scheduler is
            Sched_Time => null,
            Sched_IO   => null,
            Cancelled  => False);
-      IO_Queue : IO_Blocked_Queue_Access := Create_IO_Blocked_Queue;
-      Poll_R   : Poll_Results;
    begin
       loop
-         Poll_R := Poll_IO_Blocked_Queue (KQ => IO_Queue);
          --  Ada.Text_IO.Put_Line
          --    ("Worker Task " & Worker_Idx'Image (W_Idx) & " waiting for task");
-         Local_Work_Task_Queues (W_Idx).Process_QB (Poll_R);
-         Local_Work_Task_Queues (W_Idx).Pop (TI, Poll_R);
+         Local_Work_Task_Queues (W_Idx).Process_QB;
+         Local_Work_Task_Queues (W_Idx).Pop (TI);
          --  Local_Work_Task_Queues (W_Idx).Print_States;
          --  Ada.Text_IO.Put_Line
          --    ("Worker Task " & Worker_Idx'Image (W_Idx) & " processing task");
