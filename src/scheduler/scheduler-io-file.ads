@@ -1,5 +1,6 @@
 package Scheduler.IO.File is
    type File is private;
+   type File_Access is access all File;
 
    function Open_Read (Path : String) return File;
    function Open_Write (Path : String) return File;

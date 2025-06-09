@@ -25,9 +25,8 @@ package scheduler_io_h is
 
    function poll_events
      (kq : int;
-      events : access sys_event_h.kevent;
-      max_events : int;
-      timeout : int) return int  -- ./scheduler_io.h:8
+      events : System.Address;
+      max_events : int) return int  -- ./scheduler_io.h:8
    with Import => True, 
         Convention => C, 
         External_Name => "poll_events";

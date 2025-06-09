@@ -46,7 +46,7 @@ package body scheduler_demo is
             -- Wait for a condition or event
             --  Put_Line ("Demo Root Future is waiting...");
             scheduler.Wake_In_Future
-              (Sched_Cx => Sched_Cx, Time => Ada.Calendar.Clock + 20.0);
+              (Sched_Cx => Sched_Cx, Time => Ada.Calendar.Clock + 5.0);
             F.State := Waiting;
             Finished := False;
          

@@ -367,7 +367,7 @@ package sys_event_h is
         Convention => C, 
         External_Name => "kqueue";
 
-   function kevent
+   function kevent_func
      (kq : int;
       changelist : access constant kevent;
       nchanges : int;

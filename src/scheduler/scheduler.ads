@@ -1,8 +1,11 @@
 with Ada.Calendar;
 with Interfaces;
 with Interfaces.C;
+with sys_event_h;
 
 package Scheduler is
+   type Task_Id is private;
+
    type Sched_Cx is limited private;
    type Sched_Cx_Access is access all Sched_Cx;
 
@@ -26,8 +29,17 @@ package Scheduler is
    --    (Sched_Cx : Sched_Cx_Access;
    --     File     : Ada.Streams.Root_Stream_Type'Class);
 
+   type Bytes is array (Positive range <>) of Interfaces.C.unsigned_char;
+
 private
    Null_Future : constant Future_Access := null;
+   type Poll_Result is new sys_event_h.kevent; -- KEvent structure for polling
+   type Poll_Result_Buffer is array (1 .. 1024) of Poll_Result
+   with Convention => C;
+   type Poll_Results is record
+      Count  : Integer; -- Number of events returned
+      Events : Poll_Result_Buffer; -- Array of events
+   end record;
 
    type FD_Access is access all Interfaces.C.int;
 
@@ -49,12 +61,32 @@ private
    type Task_State is
      (Ready, Running, Cancelled, Blocked_Time, Blocked_IO, Completed);
 
+   type Task_Id is new Natural;
+
+   protected Task_Id_Generator is
+      procedure Get_Next (Id : out Task_Id);
+      -- Returns the next available Task_Id
+   private
+      Current_Id : Task_Id := 0;
+   end Task_Id_Generator;
+
+   function Get_Next_Task_Id return Task_Id;
+
    type Task_Info is record
       Fut          : Future_Access;
+      T_Id         : Task_Id;
       State        : Task_State := Ready;
       Blocked_Time : Time_Access := null;
       Blocked_IO   : FD_Access := null;
    end record;
+
+   type IO_Blocked_Queue is record
+      KQueue : Interfaces.C.int; -- KQueue file descriptor
+   end record;
+
+   type IO_Blocked_Queue_Access is access all IO_Blocked_Queue;
+
+   function Create_IO_Blocked_Queue return IO_Blocked_Queue_Access;
 
    type Local_Worker_Task_Info_Array is
      array (Local_Worker_Queue_Idx) of Task_Info;
@@ -72,16 +104,28 @@ private
         (TI : in out Local_Worker_Task_Info_Array; Count : out Natural);
 
       procedure Push_QB (TI : Local_Worker_Task_Info_Array);
-      procedure Process_QB;
+      procedure Process_QB (Poll_R : Poll_Results);
       -- Pulls tasks from the global queue into the local array, enough to fill half of it
    private
       Global_TI_Array : Global_Task_Info_Array :=
-        (others => (Fut => Null_Future, State => Ready, Blocked_Time => null, Blocked_IO => null));
+        (others =>
+           (Fut          => Null_Future,
+            State        => Ready,
+            Blocked_Time => null,
+            Blocked_IO   => null,
+            T_Id         => 0));
       First, Last     : Natural := 0;
 
       Global_TI_B_Array : Global_Task_Info_Array :=
-        (others => (Fut => Null_Future, State => Ready, Blocked_Time => null, Blocked_IO => null));
+        (others =>
+           (Fut          => Null_Future,
+            State        => Ready,
+            Blocked_Time => null,
+            Blocked_IO   => null,
+            T_Id         => 0));
       Size_QB           : Natural := 0;
+
+      IO_Q : IO_Blocked_Queue_Access := null;
    end Global_Task_Queue;
 
    protected type Worker_Task_Queue is
@@ -89,9 +133,9 @@ private
 
       procedure Push (TI : Task_Info);
       procedure Push_QB (TI : Task_Info);
-      procedure Process_QB;
+      procedure Process_QB (Poll_R : Poll_Results);
 
-      procedure Pop (TI : out Task_Info);
+      procedure Pop (TI : out Task_Info; Poll_R : Poll_Results);
       procedure Steal
         (TI : in out Local_Worker_Task_Info_Array; Count : out Natural);
 
@@ -118,4 +162,24 @@ private
       Sched_IO   : FD_Access;
       Cancelled  : Boolean := False;
    end record;
+
+   type Udata_Info is record
+      T_Id : Task_Id;                    -- Task identifier
+   end record;
+
+   type Udata_Info_Access is access all Udata_Info;
+
+   procedure Add_Read_To_IO_Blocked_Queue
+     (KQ     : IO_Blocked_Queue_Access;
+      FD     : Interfaces.C.int;
+      T_Info : Udata_Info_Access);
+   procedure Add_Write_To_IO_Blocked_Queue
+     (KQ     : IO_Blocked_Queue_Access;
+      FD     : Interfaces.C.int;
+      T_Info : Udata_Info_Access);
+   function Poll_IO_Blocked_Queue
+     (KQ : IO_Blocked_Queue_Access) return Poll_Results;
+
+   procedure Wake_On_IO
+     (Sched_Cx : Scheduler.Sched_Cx_Access; File : Interfaces.C.int);
 end Scheduler;
