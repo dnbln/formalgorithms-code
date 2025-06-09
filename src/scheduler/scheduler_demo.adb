@@ -1,9 +1,74 @@
-with Ada.Text_IO; use Ada.Text_IO;
+with Ada.Text_IO;       use Ada.Text_IO;
 with scheduler;
-with Ada.Calendar; use Ada.Calendar;
+with Ada.Calendar;      use Ada.Calendar;
+with Scheduler.IO;
+with Scheduler.IO.File;
+with Ada.Strings;       use Ada.Strings;
+with Ada.Strings.Fixed; use Ada.Strings.Fixed;
 
 package body scheduler_demo is
-   type Demo_Root_Future_State is (Initial, Running, Wait_One, Waiting, Cancelling, Wait_Again, Waiting_Again, Completed);
+   type Demo_Root_Future_State is (Initial, Running, Completed);
+
+   type FileReadFuture_State is (Initial, Waiting, Completed);
+
+   type FileReadFuture is new scheduler.Future with record
+      State : FileReadFuture_State;
+      Id    : Natural := 0;
+      Fi    : Scheduler.IO.File.File_Access;
+   end record;
+
+   overriding
+   procedure Poll
+     (F        : in out FileReadFuture;
+      Sched_Cx : scheduler.Sched_Cx_Access;
+      Finished : out Boolean) is
+   begin
+      case F.State is
+         when Initial =>
+            F.Fi :=
+              Scheduler.IO.File.Open_Read
+                (Path =>
+                   ("example" & Trim (Natural'Image (F.Id), Both) & ".txt"));
+            F.State := Waiting;
+            Finished := False;
+
+            Scheduler.IO.File.Wake_On_IO (Sched_Cx => Sched_Cx, File => F.Fi);
+
+         when Waiting =>
+            -- Simulate waiting for a file read operation
+            --  Put_Line ("FileReadFuture is waiting for file read operation...");
+
+            declare
+               Buffer : Scheduler.Bytes (1 .. 1024);
+               Count  : Natural;
+            begin
+               Scheduler.IO.File.Read
+                 (File => F.Fi, Buffer => Buffer, Count => Count);
+               Put_Line
+                 ("Read " & Integer'Image (Count) & " bytes from file.");
+
+               if Count = 0 then
+                  -- If no bytes were read, we assume the file read is complete
+                  F.State := Completed;
+               else
+                  Scheduler.IO.File.Wake_On_IO
+                    (Sched_Cx => Sched_Cx, File => F.Fi);
+               end if;
+            end;
+
+            -- Here you would normally check if the file read is complete
+            -- For demonstration, we simulate completion after some time
+            Finished := False;
+
+         when Completed =>
+            -- Finalize the task
+            Put_Line ("FileReadFuture completed file read operation.");
+
+            Scheduler.IO.File.Close (F.Fi);
+
+            Finished := True;
+      end case;
+   end Poll;
 
    type Demo_Root_Future is new scheduler.Future with record
       State  : Demo_Root_Future_State;
@@ -22,14 +87,14 @@ package body scheduler_demo is
             -- Transition to Running state
             F.State := Running;
 
-            for I in 1 .. 1_000 loop
-               scheduler.Spawn
+            for I in 0 .. 9 loop
+               -- Spawn multiple FileReadFuture tasks
+               Scheduler.Spawn
                  (Sched_Cx => Sched_Cx,
                   F        =>
-                    new Demo_Root_Future'
-                      (State => Running, Id => I, Result => False));
+                    new FileReadFuture'
+                      (State => Initial, Id => I, Fi => null));
             end loop;
-
             Finished := False;
             Put_Line
               ("Demo Root Future initialized, transitioning to Running state.");
@@ -38,49 +103,8 @@ package body scheduler_demo is
             -- Simulate some work being done
             --  Put_Line ("Running Demo Root Future..." & Integer'Image (F.Id));
             -- Transition to Completed state
-            F.State := Wait_One;
-            F.Result := True;
-            Finished := False;
-
-         when Wait_One =>
-            -- Wait for a condition or event
-            --  Put_Line ("Demo Root Future is waiting...");
-            scheduler.Wake_In_Future
-              (Sched_Cx => Sched_Cx, Time => Ada.Calendar.Clock + 5.0);
-            F.State := Waiting;
-            Finished := False;
-         
-         when Waiting =>
-            -- Check if the condition or event is met
-            Put_Line ("Demo Root Future finished waiting.");
-            if F.Id = 0 then
-               F.State := Wait_Again;
-               Put_Line ("Demo Root Future will wait again.");
-            else
-               F.State := Cancelling;
-            end if;
-
-            Finished := False;
-            -- Simulate condition being met after some time
-         
-         when Cancelling => 
-            -- Handle cancellation logic
-            Put_Line ("Demo Root Future is being cancelled.");
-            scheduler.Cancel (Sched_Cx);
-            Finished := False;
-         
-         when Wait_Again =>
-            -- Wait again for some condition or event
-            Put_Line ("Demo Root Future is waiting again...");
-            scheduler.Wake_In_Future
-              (Sched_Cx => Sched_Cx, Time => Ada.Calendar.Clock + 1.0);
-            F.State := Waiting_Again;
-            Finished := False;
-
-         when Waiting_Again =>
-            -- Check if the condition or event is met again
-            Put_Line ("Demo Root Future finished waiting again.");
             F.State := Completed;
+            F.Result := True;
             Finished := False;
 
          when Completed =>

@@ -1,4 +1,6 @@
 #include <sys/event.h>
+#include <fcntl.h>
+#include <unistd.h>
 
 
 int create_kqueue();

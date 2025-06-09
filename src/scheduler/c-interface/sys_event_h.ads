@@ -12,6 +12,7 @@ with sys_utypes_uintptr_t_h;
 with System;
 with utypes_uuint64_t_h;
 with sys_utypes_uint64_t_h;
+limited with sys_utypes_utimespec_h;
 
 package sys_event_h is
 
@@ -360,8 +361,6 @@ package sys_event_h is
    end record
    with Convention => C_Pass_By_Copy;  -- /nix/store/ydnlq230f9gl0sr5ha0jgza0zfhbl1pa-apple-sdk-11.3/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/sys/event.h:371
 
-   type timespec is null record;   -- incomplete struct
-
    function kqueue return int  -- /nix/store/ydnlq230f9gl0sr5ha0jgza0zfhbl1pa-apple-sdk-11.3/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/sys/event.h:379
    with Import => True, 
         Convention => C, 
@@ -373,7 +372,7 @@ package sys_event_h is
       nchanges : int;
       eventlist : access kevent;
       nevents : int;
-      timeout : access constant timespec) return int  -- /nix/store/ydnlq230f9gl0sr5ha0jgza0zfhbl1pa-apple-sdk-11.3/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/sys/event.h:380
+      timeout : access constant sys_utypes_utimespec_h.timespec) return int  -- /nix/store/ydnlq230f9gl0sr5ha0jgza0zfhbl1pa-apple-sdk-11.3/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/sys/event.h:380
    with Import => True, 
         Convention => C, 
         External_Name => "kevent";
@@ -385,7 +384,7 @@ package sys_event_h is
       eventlist : access kevent64_s;
       nevents : int;
       flags : unsigned;
-      timeout : access constant timespec) return int  -- /nix/store/ydnlq230f9gl0sr5ha0jgza0zfhbl1pa-apple-sdk-11.3/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/sys/event.h:384
+      timeout : access constant sys_utypes_utimespec_h.timespec) return int  -- /nix/store/ydnlq230f9gl0sr5ha0jgza0zfhbl1pa-apple-sdk-11.3/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/sys/event.h:384
    with Import => True, 
         Convention => C, 
         External_Name => "kevent64";

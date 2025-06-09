@@ -7,9 +7,12 @@ with Types;
 with hmap_int_to_int; use hmap_int_to_int;
 with pub_sub_int_channel;
 --  with test_pub_sub;
-with scheduler;
+with Scheduler;
+
+with Scheduler_Demo_Timers;
 with scheduler_demo;
-pragma Elaborate_All (scheduler);
+
+pragma Elaborate_All (Scheduler);
 
 procedure Formalgorithms is
    t : Types.IArr := (0, 10, 45, 1, -10, -100);
@@ -65,5 +68,6 @@ begin
 
    --  test_pub_sub.Test_Pub_Sub;
    --  Test_Coroutine.Test_Coroutine;
+   --  Scheduler_Demo_Timers.Run_Demo;
    scheduler_demo.Run_Demo;
 end Formalgorithms;

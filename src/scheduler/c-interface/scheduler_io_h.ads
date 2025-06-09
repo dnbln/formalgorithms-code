@@ -9,7 +9,7 @@ limited with sys_event_h;
 
 package scheduler_io_h is
 
-   function create_kqueue return int  -- ./scheduler_io.h:4
+   function create_kqueue return int  -- ./scheduler_io.h:5
    with Import => True, 
         Convention => C, 
         External_Name => "create_kqueue";
@@ -18,7 +18,7 @@ package scheduler_io_h is
      (kq : int;
       fd : int;
       filter : short;
-      udata : System.Address) return int  -- ./scheduler_io.h:6
+      udata : System.Address) return int  -- ./scheduler_io.h:7
    with Import => True, 
         Convention => C, 
         External_Name => "register_event";
@@ -26,7 +26,7 @@ package scheduler_io_h is
    function unregister_event
      (kq : int;
       fd : int;
-      filter : short) return int  -- ./scheduler_io.h:7
+      filter : short) return int  -- ./scheduler_io.h:8
    with Import => True, 
         Convention => C, 
         External_Name => "unregister_event";
