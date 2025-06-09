@@ -169,6 +169,7 @@ private
 
    task type Worker_Task is
       entry Start (Idx : Worker_Idx);
+      entry Stop;
    end Worker_Task;
 
    type Sched_Cx is record

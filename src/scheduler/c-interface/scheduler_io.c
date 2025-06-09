@@ -28,3 +28,10 @@ int poll_events(int kq, struct kevent *events, int max_events)
     ts.tv_nsec = 0;
     return kevent(kq, NULL, 0, events, max_events, &ts);
 }
+
+void advise_sequencial(int fd)
+{
+#ifndef __APPLE__
+    (void)posix_fadvise(fd, 0, 0, POSIX_FADV_SEQUENTIAL);
+#endif
+}

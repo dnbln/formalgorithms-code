@@ -4,6 +4,7 @@ with Ada.Text_IO;
 with scheduler_io_h;
 with sys_utypes_uuintptr_t_h; use sys_utypes_uuintptr_t_h;
 with Interfaces.C;            use Interfaces.C;
+with sys_utypes_uint16_t_h;
 
 package body Scheduler is
    function Time_Image (T : Ada.Calendar.Time) return String is
@@ -49,6 +50,18 @@ package body Scheduler is
       return Id;
    end Get_Next_Task_Id;
 
+   function Filter_For_Blocking_Type
+     (Blocked_Type : Blocked_IO_Type) return sys_utypes_uint16_t_h.int16_t is
+   begin
+      case Blocked_Type is
+         when Read =>
+            return sys_event_h.EVFILT_READ;
+
+         when Write =>
+            return sys_event_h.EVFILT_WRITE;
+      end case;
+   end Filter_For_Blocking_Type;
+
    function Task_Is_Blocked_But_Ready
      (TI : Task_Info; Poll_R : Poll_Results) return Boolean is
    begin
@@ -59,7 +72,10 @@ package body Scheduler is
          return True;
       elsif TI.State = Blocked_IO then
          for I in 1 .. Poll_R.Count loop
-            if Poll_R.Events (I).ident = unsigned_long (TI.Blocked_IO.FD) then
+            if Poll_R.Events (I).ident = unsigned_long (TI.Blocked_IO.FD)
+              and then Poll_R.Events (I).filter
+                       = Filter_For_Blocking_Type (TI.Blocked_IO.Blocked_Type)
+            then
                --  If the task is blocked on IO and the event is ready, return True
                return True;
             end if;
@@ -399,7 +415,8 @@ package body Scheduler is
       begin
          if Size /= 0 then
             raise Program_Error
-              with "Worker Task Queue is not empty, cannot enqueue from global queue";
+              with
+                "Worker Task Queue is not empty, cannot enqueue from global queue";
          end if;
          Global_Task_Queue.Try_Pull (Q, Size);
          Count := Size;
@@ -662,28 +679,44 @@ package body Scheduler is
       Local_Work_Task_Queues (W_Idx).Attempt_Enqueue_From_Global
         (Count => Count);
       if Count > 0 then
-         Ada.Text_IO.Put_Line
-           ("Worker Task "
-            & Worker_Idx'Image (W_Idx)
-            & " enqueued "
-            & Natural'Image (Count)
-            & " tasks from global queue");
+         --  Ada.Text_IO.Put_Line
+         --    ("Worker Task "
+         --     & Worker_Idx'Image (W_Idx)
+         --     & " enqueued "
+         --     & Natural'Image (Count)
+         --     & " tasks from global queue");
          return;
       end if;
    end Enqueue_Work_From_Other_Queues;
 
-   procedure Run_Main_Root_Delegate (W_Idx : Worker_Idx) is
+   task body Worker_Task is
+      W_Idx    : Worker_Idx;
       TI       : Task_Info;
       Finished : Boolean;
-      Sch_Cx   : constant Sched_Cx_Access :=
+      Sch_Cx   : Sched_Cx_Access;
+      Tick     : Tick_Info;
+   begin
+      accept Start (Idx : Worker_Idx) do
+         W_Idx := Idx;
+      end Start;
+      --  Ada.Text_IO.Put_Line
+      --    ("Worker Task " & Worker_Idx'Image (W_Idx) & " started");
+      Sch_Cx :=
         new Sched_Cx'
           (W_Idx      => W_Idx,
            Sched_Time => null,
            Sched_IO   => null,
            Cancelled  => False);
-      Tick     : Tick_Info;
-   begin
+      Main_Loop :
       loop
+         select
+            accept Stop do
+               null;
+            end Stop;
+            exit Main_Loop;
+         or
+            delay 0.0; -- Yield to allow other tasks to run
+         end select;
          Local_Work_Task_Queues (W_Idx).Process_QB;
          Tick := Local_Work_Task_Queues (W_Idx).Make_Tick_Info;
 
@@ -695,12 +728,10 @@ package body Scheduler is
                --    ("Worker Task " & Worker_Idx'Image (W_Idx) & " waiting for task");
                Local_Work_Task_Queues (W_Idx).Next_Task (TI, Tick);
                --  Local_Work_Task_Queues (W_Idx).Print_States;
-               if W_Idx /= 1 then
-                  Ada.Text_IO.Put_Line
-                    ("Worker Task "
-                     & Worker_Idx'Image (W_Idx)
-                     & " processing task");
-               end if;
+               --  Ada.Text_IO.Put_Line
+               --    ("Worker Task "
+               --     & Worker_Idx'Image (W_Idx)
+               --     & " processing task");
                Sch_Cx.Sched_Time := null;
                Sch_Cx.Sched_IO := null;
                Sch_Cx.Cancelled := False;
@@ -755,30 +786,17 @@ package body Scheduler is
             end loop;
             Local_Work_Task_Queues (W_Idx).Flush_Blocked;
          end if;
-      end loop;
-   end Run_Main_Root_Delegate;
-
-   task body Worker_Task is
-      W_Idx : Worker_Idx;
-   begin
-      accept Start (Idx : Worker_Idx) do
-         W_Idx := Idx;
-      end Start;
-      --  Ada.Text_IO.Put_Line
-      --    ("Worker Task " & Worker_Idx'Image (W_Idx) & " started");
-      begin
-         Run_Main_Root_Delegate (W_Idx);
-      exception
-         when E : others =>
-            --  Handle any exceptions that may occur during polling
-            Ada.Text_IO.Put_Line
-              ("Worker Task "
-               & Worker_Idx'Image (W_Idx)
-               & " encountered an error: "
-               & Ada.Exceptions.Exception_Information (E));
-      end;
-   --  Ada.Text_IO.Put_Line
-   --    ("Worker Task " & Worker_Idx'Image (W_Idx) & " finished");
+      end loop Main_Loop;
+   exception
+      when E : others =>
+         --  Handle any exceptions that may occur during polling
+         Ada.Text_IO.Put_Line
+           ("Worker Task "
+            & Worker_Idx'Image (W_Idx)
+            & " encountered an error: "
+            & Ada.Exceptions.Exception_Information (E));
+         --  Ada.Text_IO.Put_Line
+         --    ("Worker Task " & Worker_Idx'Image (W_Idx) & " finished");
    end Worker_Task;
 
    procedure Spawn_RT (Root : Future_Access) is
@@ -819,6 +837,10 @@ package body Scheduler is
          --  Ada.Text_IO.Put_Line
          --    ("Waiting for workers to finish, work left: "
          --     & Boolean'Image (Work_Left));
+      end loop;
+
+      for I in Workers'Range loop
+         Workers (I).Stop;
       end loop;
 
       Ada.Text_IO.Put_Line ("All tasks completed.");

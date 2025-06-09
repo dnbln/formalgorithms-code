@@ -1,6 +1,7 @@
 with Ada.Text_IO;
 with Interfaces.C; use Interfaces.C;
 with Interfaces.C.Strings;
+with scheduler_io_h;
 with sys_fcntl_h;
 with unistd_h;
 with sys_utypes_ussize_t_h;
@@ -14,7 +15,7 @@ package body Scheduler.IO.File is
       Fd      : Interfaces.C.int;
       FAccess : File_Access;
    begin
-      Ada.Text_IO.Put_Line ("Opening file for reading: " & Path);
+      --  Ada.Text_IO.Put_Line ("Opening file for reading: " & Path);
       Fd := sys_fcntl_h.open (P, Interfaces.C.int (sys_fcntl_h.O_RDONLY));
       Interfaces.C.Strings.Free (P);
       if Integer (Fd) < 0 then
@@ -65,6 +66,14 @@ package body Scheduler.IO.File is
       FAccess := new File'(FD => Fd);
       return FAccess;
    end Open_Append;
+
+   procedure Advise_Read_Sequencial (File : in out File_Access) is
+   begin
+      scheduler_io_h.advise_sequencial (File.FD);
+   -- This marks the file descriptor for sequential read access.
+   -- It is a no-op in this example, but can be used to set flags if needed.
+   --  Ada.Text_IO.Put_Line ("Marked file for sequential read access.");
+   end Advise_Read_Sequencial;
 
    procedure Close (File : in out File_Access) is
       R : Interfaces.C.int;

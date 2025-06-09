@@ -567,7 +567,7 @@ package sys_fcntl_h is
       ) return int  -- /nix/store/ydnlq230f9gl0sr5ha0jgza0zfhbl1pa-apple-sdk-11.3/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/sys/fcntl.h:559
    with Import => True, 
         Convention => C, 
-        External_Name => "_fcntl";
+        External_Name => "fcntl";
 
    function openx_np
      (arg1 : Interfaces.C.Strings.chars_ptr;

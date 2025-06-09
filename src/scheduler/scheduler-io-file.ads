@@ -7,6 +7,9 @@ package Scheduler.IO.File is
    function Open_Read (Path : String) return File_Access;
    function Open_Write (Path : String) return File_Access;
    function Open_Append (Path : String) return File_Access;
+
+   procedure Advise_Read_Sequencial (File : in out File_Access);
+
    procedure Close (File : in out File_Access);
 
    procedure Read

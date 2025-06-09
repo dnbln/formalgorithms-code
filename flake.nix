@@ -2,7 +2,7 @@
   description = "formalgorithms devshell";
 
   inputs = {
-    nixpkgs.url      = "github:NixOS/nixpkgs/nixos-unstable";
+    nixpkgs.url      = "github:NixOS/nixpkgs/nixpkgs-unstable";
     flake-utils.url  = "github:numtide/flake-utils";
   };
 
@@ -19,8 +19,9 @@
           buildInputs = [
             pkg-config
             zstd
-            alr
+            alire
             libiconvReal
+            pv
           ];
         };
       }
