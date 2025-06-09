@@ -73,8 +73,8 @@ private
    type Blocked_IO_Type is (Read, Write);
 
    type Blocked_IO_Info is record
-      FD : Interfaces.C.int; -- File descriptor for the blocked IO
-      Blocked_Type: Blocked_IO_Type;
+      FD           : Interfaces.C.int; -- File descriptor for the blocked IO
+      Blocked_Type : Blocked_IO_Type;
    end record;
 
    type Blocked_IO_Info_Access is access all Blocked_IO_Info;
@@ -183,6 +183,10 @@ private
      (KQ     : IO_Blocked_Queue_Access;
       FD     : Interfaces.C.int;
       T_Info : Udata_Info_Access);
+   procedure Remove_Read_From_IO_Blocked_Queue
+     (KQ : IO_Blocked_Queue_Access; FD : Interfaces.C.int);
+   procedure Remove_Write_From_IO_Blocked_Queue
+     (KQ : IO_Blocked_Queue_Access; FD : Interfaces.C.int);
    function Poll_IO_Blocked_Queue
      (KQ : IO_Blocked_Queue_Access) return Poll_Results;
 

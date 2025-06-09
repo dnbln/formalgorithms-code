@@ -23,6 +23,14 @@ package scheduler_io_h is
         Convention => C, 
         External_Name => "register_event";
 
+   function unregister_event
+     (kq : int;
+      fd : int;
+      filter : short) return int  -- ./scheduler_io.h:7
+   with Import => True, 
+        Convention => C, 
+        External_Name => "unregister_event";
+
    function poll_events
      (kq : int;
       events : System.Address;

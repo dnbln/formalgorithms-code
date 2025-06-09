@@ -10,7 +10,14 @@ int create_kqueue()
 int register_event(int kq, int fd, short filter, void *udata)
 {
     struct kevent event;
-    EV_SET(&event, fd, filter, EV_ADD | EV_ENABLE | EV_ONESHOT, 0, 0, udata);
+    EV_SET(&event, fd, filter, EV_ADD | EV_ONESHOT, 0, 0, udata);
+    return kevent(kq, &event, 1, NULL, 0, NULL);
+}
+
+int unregister_event(int kq, int fd, short filter)
+{
+    struct kevent event;
+    EV_SET(&event, fd, filter, EV_DELETE, 0, 0, NULL);
     return kevent(kq, &event, 1, NULL, 0, NULL);
 }
 

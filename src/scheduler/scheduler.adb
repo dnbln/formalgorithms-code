@@ -62,6 +62,52 @@ package body Scheduler is
       end if;
    end Task_Is_Blocked_But_Ready;
 
+   procedure Add_Block_To_IO_Blocked_Queue
+     (KQ : IO_Blocked_Queue_Access; TI : Task_Info)
+   is
+      B_Info : Blocked_IO_Info;
+   begin
+      if TI.Blocked_IO = null then
+         return;
+      end if;
+
+      B_Info := TI.Blocked_IO.all;
+
+      case B_Info.Blocked_Type is
+         when Read =>
+            Add_Read_To_IO_Blocked_Queue
+              (KQ     => KQ,
+               FD     => B_Info.FD,
+               T_Info => new Udata_Info'(T_Id => TI.T_Id));
+
+         when Write =>
+            Add_Write_To_IO_Blocked_Queue
+              (KQ     => KQ,
+               FD     => B_Info.FD,
+               T_Info => new Udata_Info'(T_Id => TI.T_Id));
+      end case;
+   end Add_Block_To_IO_Blocked_Queue;
+
+   procedure Remove_Block_From_IO_Blocked_Queue
+     (KQ : IO_Blocked_Queue_Access; TI : Task_Info)
+   is
+      B_Info : Blocked_IO_Info;
+   begin
+      if TI.Blocked_IO = null then
+         return;
+      end if;
+
+      B_Info := TI.Blocked_IO.all;
+
+      case B_Info.Blocked_Type is
+         when Read =>
+            Remove_Read_From_IO_Blocked_Queue (KQ => KQ, FD => B_Info.FD);
+
+         when Write =>
+            Remove_Write_From_IO_Blocked_Queue (KQ => KQ, FD => B_Info.FD);
+      end case;
+   end Remove_Block_From_IO_Blocked_Queue;
+
    protected body Global_Task_Queue is
       function Has_Work_Left return Boolean
       is (First < Last or else Size_QB > 0);
@@ -755,6 +801,32 @@ package body Scheduler is
          raise Program_Error with "Error registering write event";
       end if;
    end Add_Write_To_IO_Blocked_Queue;
+
+   procedure Remove_Read_From_IO_Blocked_Queue
+     (KQ : IO_Blocked_Queue_Access; FD : Interfaces.C.int)
+   is
+      Result : Interfaces.C.int;
+   begin
+      Result :=
+        scheduler_io_h.unregister_event
+          (KQ.KQueue, FD, sys_event_h.EVFILT_READ);
+      if Integer (Result) < 0 then
+         raise Program_Error with "Error unregistering read event";
+      end if;
+   end Remove_Read_From_IO_Blocked_Queue;
+
+   procedure Remove_Write_From_IO_Blocked_Queue
+     (KQ : IO_Blocked_Queue_Access; FD : Interfaces.C.int)
+   is
+      Result : Interfaces.C.int;
+   begin
+      Result :=
+        scheduler_io_h.unregister_event
+          (KQ.KQueue, FD, sys_event_h.EVFILT_WRITE);
+      if Integer (Result) < 0 then
+         raise Program_Error with "Error unregistering write event";
+      end if;
+   end Remove_Write_From_IO_Blocked_Queue;
 
    function Poll_IO_Blocked_Queue
      (KQ : IO_Blocked_Queue_Access) return Poll_Results
