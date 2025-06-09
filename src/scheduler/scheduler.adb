@@ -190,7 +190,8 @@ package body Scheduler is
       procedure Poll_IO (Poll_R : out Poll_Results) is
       begin
          if IO_Q = null then
-            IO_Q := Create_IO_Blocked_Queue;
+            Poll_R := (Events => (others => <>), Count => 0);
+            return;
          end if;
          Poll_R := Poll_IO_Blocked_Queue (KQ => IO_Q);
       end Poll_IO;
@@ -276,6 +277,16 @@ package body Scheduler is
             Global_TI_B_Array (Global_Task_Info_Idx (Size_QB + Natural (I))) :=
               TI (I);
          end loop;
+
+         if IO_Q = null then
+            IO_Q := Create_IO_Blocked_Queue;
+         end if;
+
+         for I in Local_Worker_Queue_Idx'First .. Local_Worker_Queue_Idx_Half
+         loop
+            Add_Block_To_IO_Blocked_Queue (KQ => IO_Q, TI => TI (I));
+         end loop;
+
          Size_QB := Size_QB + Local_Worker_Queue_Size_Half;
       --  Ada.Text_IO.Put_Line
       --    ("Global Task Queue: Pushed QB, new Size_QB: "
@@ -414,6 +425,7 @@ package body Scheduler is
             for I
               in Local_Worker_Queue_Idx'First .. Local_Worker_Queue_Idx_Half
             loop
+               Remove_Block_From_IO_Blocked_Queue (KQ => IO_Q, TI => QB (I));
                QB (I) := QB (Local_Worker_Queue_Idx_Half + I);
             end loop;
             Size_QB := Size_QB - Local_Worker_Queue_Size_Half;
@@ -425,6 +437,10 @@ package body Scheduler is
 
          Size_QB := Size_QB + 1;
          QB (Local_Worker_Queue_Idx (Size_QB)) := TI;
+         if IO_Q = null then
+            IO_Q := Create_IO_Blocked_Queue;
+         end if;
+         Add_Block_To_IO_Blocked_Queue (KQ => IO_Q, TI => TI);
 
       --  Ada.Text_IO.Put_Line
       --    ("Worker Task Queue: Pushed QB, new Size_QB: "

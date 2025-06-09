@@ -153,6 +153,8 @@ private
       Clk_Idx     : Local_Worker_Queue_Idx;
       QB          : Local_Worker_Task_Info_Array; -- Buffer for blocked tasks
       Size_QB     : Natural := 0;
+
+      IO_Q : IO_Blocked_Queue_Access := null;
    end Worker_Task_Queue;
 
    type Worker_Idx is new Natural range 1 .. Worker_Count;
