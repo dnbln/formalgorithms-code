@@ -3,6 +3,7 @@ with Ada.Exceptions;
 with Ada.Text_IO;
 with Interfaces.C.Strings;    use Interfaces.C.Strings;
 with scheduler_io_h;
+with sys_utypes_uintptr_t_h;
 with sys_utypes_uuintptr_t_h; use sys_utypes_uuintptr_t_h;
 with Interfaces.C;            use Interfaces.C;
 with sys_utypes_uint16_t_h;
@@ -88,7 +89,22 @@ package body Scheduler is
             then
                --  If the task is blocked on IO and the event is ready, return True
                Result := True;
+               --  Ada.Text_IO.Put_Line
+               --    ("Task "
+               --     & Task_Id'Image (TI.T_Id)
+               --     & " is blocked on IO, FD: "
+               --     & int'Image (TI.Blocked_IO.FD)
+               --     & ", Type: "
+               --     & Blocked_IO_Type'Image (TI.Blocked_IO.Blocked_Type)
+               --     & ", Data: "
+               --     & sys_utypes_uintptr_t_h.intptr_t'Image
+               --         (Poll_R.Events (I).data));
                Count_Data_Available_If_IO := Natural (Poll_R.Events (I).data);
+               --  Ada.Text_IO.Put_Line
+               --    ("Data available for task "
+               --     & Task_Id'Image (TI.T_Id)
+               --     & ": "
+               --     & Natural'Image (Count_Data_Available_If_IO));
                IO_Did_EOF :=
                  (Mod_Int (Poll_R.Events (I).flags)
                   and Mod_Int (sys_event_h.EV_EOF))
@@ -481,7 +497,7 @@ package body Scheduler is
 
    protected body Worker_Task_Queue is
       function Has_Work_Left return Boolean
-      is (Size > 0 or Size_QB > 0);
+      is (Size > 0 or else Size_QB > 0);
 
       function Make_Tick_Info return Tick_Info
       is ((Current => 0, Count => Size));
@@ -1030,8 +1046,8 @@ package body Scheduler is
          Blocked_IO   => null,
          T_Id         => Get_Next_Task_Id);
       Local_Work_Task_Queues (Sched_Cx.W_Idx).Push (TI);
-      --  Ada.Text_IO.Put_Line
-      --    ("Spawned task with ID: " & Task_Id'Image (TI.T_Id));
+   --  Ada.Text_IO.Put_Line
+   --    ("Spawned task with ID: " & Task_Id'Image (TI.T_Id));
    end Spawn;
 
    procedure Wake_In_Future

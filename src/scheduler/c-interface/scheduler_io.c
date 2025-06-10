@@ -37,7 +37,14 @@ int poll_events(int kq, struct kevent *events, int max_events)
     struct timespec ts;
     ts.tv_sec = 0;
     ts.tv_nsec = 0;
-    return kevent(kq, NULL, 0, events, max_events, &ts);
+    int results = kevent(kq, NULL, 0, events, max_events, &ts);
+
+    // for (int i = 0; i < results; i++)
+    // {
+    //     printf("Event data for fd %d: %ld\n", (int)events[i].ident, (long)events[i].data);
+    // }
+
+    return results;
 }
 
 void advise_sequencial(int fd)

@@ -14,7 +14,7 @@ package body Scheduler.IO.Socket is
         scheduler_io_h.listen_socket
           (ip      => Address'Address,
            port    => Interfaces.C.int (P),
-           backlog => 10_000);
+           backlog => 1_000);
       if Integer (Sock) < 0 then
          raise Program_Error with "Failed to connect socket";
       end if;

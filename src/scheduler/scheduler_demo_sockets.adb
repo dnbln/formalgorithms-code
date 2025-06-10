@@ -73,7 +73,7 @@ package body Scheduler_Demo_Sockets is
                     Scheduler.IO.Socket.Accept_Socket (F.LS);
                begin
                   -- Create a new Socket Future for the accepted socket
-                  Put_Line ("Accepted new socket connection.");
+                  --  Put_Line ("Accepted new socket connection.");
                   Scheduler.Spawn
                     (Sched_Cx,
                      new Socket_Future'
@@ -109,7 +109,7 @@ package body Scheduler_Demo_Sockets is
          when Initial =>
             Put_Line
               ("Socket Future initialized, transitioning to Running state.");
-            --  Scheduler.IO.Socket.Mark_TCP_NoDelay (F.Sock);
+            Scheduler.IO.Socket.Mark_TCP_NoDelay (F.Sock);
             -- Transition to Running state
             F.State := Awaiting_Read;
 
@@ -156,6 +156,9 @@ package body Scheduler_Demo_Sockets is
               Scheduler.Get_Available_Data (Sched_Cx => Sched_Cx);
             Processing_Data := F.Count - F.Write_Offset;
 
+            --  Put_Line
+            --    ("Echoing data to socket... " & Natural'Image (Processing_Data));
+
             if Processing_Data > Available_Data - 1 then
                Processing_Data := Available_Data - 1;
             end if;
@@ -195,6 +198,9 @@ package body Scheduler_Demo_Sockets is
                return;
             end if;
             Processing_Data := F.Count - F.Write_Offset;
+
+            --  Put_Line
+            --    ("Echoing data to socket... " & Natural'Image (Processing_Data));
 
             if Processing_Data > Available_Data - 1 then
                Processing_Data := Available_Data - 1;
