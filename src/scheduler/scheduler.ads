@@ -25,9 +25,7 @@ package Scheduler is
 
    procedure Cancel (Sched_Cx : Sched_Cx_Access);
 
-   --  procedure Wake_On_IO
-   --    (Sched_Cx : Sched_Cx_Access;
-   --     File     : Ada.Streams.Root_Stream_Type'Class);
+   function Get_Available_Data (Sched_Cx : Sched_Cx_Access) return Natural;
 
    type Bytes is array (Positive range <>) of Interfaces.C.unsigned_char;
 
@@ -80,6 +78,7 @@ private
    type Blocked_IO_Info is record
       FD           : Interfaces.C.int; -- File descriptor for the blocked IO
       Blocked_Type : Blocked_IO_Type;
+      Data         : Natural;
    end record;
 
    type Blocked_IO_Info_Access is access all Blocked_IO_Info;
@@ -173,10 +172,11 @@ private
    end Worker_Task;
 
    type Sched_Cx is record
-      W_Idx      : Worker_Idx;
-      Sched_Time : Time_Access;
-      Sched_IO   : Blocked_IO_Info_Access;
-      Cancelled  : Boolean := False;
+      W_Idx                : Worker_Idx;
+      Sched_Time           : Time_Access;
+      Sched_IO             : Blocked_IO_Info_Access;
+      Prev_Blocked_IO_Info : Blocked_IO_Info_Access;
+      Cancelled            : Boolean := False;
    end record;
 
    type Udata_Info is record
