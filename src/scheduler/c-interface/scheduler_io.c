@@ -10,6 +10,8 @@
 #include <netdb.h>
 #include <arpa/inet.h>
 #include <unistd.h>
+#include <netinet/tcp.h>
+
 
 int create_kqueue()
 {
@@ -95,4 +97,10 @@ int close_socket(int sfd)
 void call_perror(const char *msg)
 {
     perror(msg);
+}
+
+int mark_tcp_nodelay(int fd)
+{
+    int flag = 1;
+    return setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(flag));
 }

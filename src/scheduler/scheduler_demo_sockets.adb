@@ -16,7 +16,7 @@ package body Scheduler_Demo_Sockets is
       Finished : out Boolean);
 
    type Socket_Future_State is
-     (Initial, Awaiting_Read, Awaiting_Write, Completed);
+     (Initial, Awaiting_Read, Awaiting_Write, Awaiting_Write_Last, Completed);
    type Socket_Future is new Scheduler.Future with record
       State        : Socket_Future_State;
       Sock         : Scheduler.IO.Socket.Socket_Access;
@@ -73,6 +73,7 @@ package body Scheduler_Demo_Sockets is
                     Scheduler.IO.Socket.Accept_Socket (F.LS);
                begin
                   -- Create a new Socket Future for the accepted socket
+                  Put_Line ("Accepted new socket connection.");
                   Scheduler.Spawn
                     (Sched_Cx,
                      new Socket_Future'
@@ -101,18 +102,19 @@ package body Scheduler_Demo_Sockets is
       Sched_Cx : Scheduler.Sched_Cx_Access;
       Finished : out Boolean)
    is
-      Available_Data : Natural;
-      Writing_Data   : Natural;
+      Available_Data  : Natural;
+      Processing_Data : Natural;
    begin
       case F.State is
          when Initial =>
+            Put_Line
+              ("Socket Future initialized, transitioning to Running state.");
+            --  Scheduler.IO.Socket.Mark_TCP_NoDelay (F.Sock);
             -- Transition to Running state
             F.State := Awaiting_Read;
 
             -- Here you would typically set up a socket connection
             -- For demonstration, we will just print a message.
-            Put_Line
-              ("Socket Future initialized, transitioning to Running state.");
 
             Scheduler.IO.Socket.Wake_On_IO_Read
               (Sched_Cx => Sched_Cx, Socket => F.Sock);
@@ -123,19 +125,21 @@ package body Scheduler_Demo_Sockets is
             -- Compute number of bytes to read
             Available_Data :=
               Scheduler.Get_Available_Data (Sched_Cx => Sched_Cx);
-            if F.Buffer'Length < Available_Data then
-               Available_Data := F.Buffer'Length;
+            Processing_Data := Available_Data;
+            if F.Buffer'Length < Processing_Data then
+               Processing_Data := F.Buffer'Length;
             end if;
 
             -- read data from the socket
             Scheduler.IO.Socket.Read
-              (F.Sock, F.Buffer (1 .. Available_Data), F.Count);
+              (F.Sock, F.Buffer (1 .. Processing_Data), F.Count);
+            F.Write_Offset := 1;
 
             if Scheduler.IO_EOF (Sched_Cx => Sched_Cx) then
                -- If no bytes were read, we assume the socket read is complete
-               F.State := Completed;
-               Put_Line
-                 ("No data read from socket, transitioning to Completed state.");
+               Scheduler.IO.Socket.Wake_On_IO_Write
+                 (Sched_Cx => Sched_Cx, Socket => F.Sock);
+               F.State := Awaiting_Write_Last;
             else
                Scheduler.IO.Socket.Wake_On_IO_Write
                  (Sched_Cx => Sched_Cx, Socket => F.Sock);
@@ -150,10 +154,10 @@ package body Scheduler_Demo_Sockets is
             -- Simulate writing to the socket
             Available_Data :=
               Scheduler.Get_Available_Data (Sched_Cx => Sched_Cx);
-            Writing_Data := F.Count - F.Write_Offset;
+            Processing_Data := F.Count - F.Write_Offset;
 
-            if Writing_Data > Available_Data - 1 then
-               Writing_Data := Available_Data - 1;
+            if Processing_Data > Available_Data - 1 then
+               Processing_Data := Available_Data - 1;
             end if;
 
             declare
@@ -161,7 +165,8 @@ package body Scheduler_Demo_Sockets is
             begin
                Scheduler.IO.Socket.Write
                  (F.Sock,
-                  F.Buffer (F.Write_Offset .. F.Write_Offset + Writing_Data),
+                  F.Buffer
+                    (F.Write_Offset .. F.Write_Offset + Processing_Data),
                   Count);
                F.Write_Offset := F.Write_Offset + Count;
             end;
@@ -169,10 +174,46 @@ package body Scheduler_Demo_Sockets is
             if F.Write_Offset > F.Count then
                -- Transition to Completed state
                F.State := Awaiting_Read;
-               F.Write_Offset := 1;
 
                Scheduler.IO.Socket.Wake_On_IO_Read
                  (Sched_Cx => Sched_Cx, Socket => F.Sock);
+            else
+               -- Still have data to write, continue waiting
+               Scheduler.IO.Socket.Wake_On_IO_Write
+                 (Sched_Cx => Sched_Cx, Socket => F.Sock);
+            end if;
+
+            Finished := False;
+
+         when Awaiting_Write_Last =>
+            Available_Data :=
+              Scheduler.Get_Available_Data (Sched_Cx => Sched_Cx);
+            if F.Write_Offset >= F.Count then
+               -- No more data to write, transition to Completed state
+               F.State := Completed;
+               Finished := False;
+               return;
+            end if;
+            Processing_Data := F.Count - F.Write_Offset;
+
+            if Processing_Data > Available_Data - 1 then
+               Processing_Data := Available_Data - 1;
+            end if;
+
+            declare
+               Count : Natural;
+            begin
+               Scheduler.IO.Socket.Write
+                 (F.Sock,
+                  F.Buffer
+                    (F.Write_Offset .. F.Write_Offset + Processing_Data),
+                  Count);
+               F.Write_Offset := F.Write_Offset + Count;
+            end;
+
+            if F.Write_Offset > F.Count then
+               -- Transition to Completed state
+               F.State := Completed;
             else
                -- Still have data to write, continue waiting
                Scheduler.IO.Socket.Wake_On_IO_Write

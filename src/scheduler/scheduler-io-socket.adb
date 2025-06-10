@@ -93,6 +93,16 @@ package body Scheduler.IO.Socket is
       Count := Natural (Bytes_Written);
    end Write;
 
+   procedure Mark_TCP_NoDelay (Socket : Socket_Access) is
+      Result : Interfaces.C.int;
+   begin
+      -- Implementation to set TCP_NODELAY option
+      Result := scheduler_io_h.mark_tcp_nodelay (Socket.FD);
+      if Result < 0 then
+         raise Program_Error with "Failed to set TCP_NODELAY";
+      end if;
+   end Mark_TCP_NoDelay;
+
    procedure Wake_On_Connection_Requested
      (Sched_Cx : Scheduler.Sched_Cx_Access; Listener : Listener_Socket_Access)
    is

@@ -2,7 +2,7 @@
 
 tcpkali 127.0.0.1:8080 \
   -c 10000 \
-  --message-rate 1 \
+  --message-rate 0.1 \
   --message "ping\n" \
   -T 30 \
-  --connect-rate 3000    # connection/sec
+  --connect-rate 3000 --nagle off    # connection/sec

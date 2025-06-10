@@ -52,6 +52,9 @@ package scheduler_io_h is
      (msg : Interfaces.C.Strings.chars_ptr) -- ./scheduler_io.h:20
    with Import => True, Convention => C, External_Name => "call_perror";
 
+   function mark_tcp_nodelay (sfd : int) return int  -- ./scheduler_io.h:22
+   with Import => True, Convention => C, External_Name => "mark_tcp_nodelay";
+
 end scheduler_io_h;
 
 pragma Style_Checks (On);

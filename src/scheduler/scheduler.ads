@@ -119,6 +119,8 @@ private
       procedure Push_QB (TI : Local_Worker_Task_Info_Array);
       procedure Process_QB (Poll_R : Poll_Results);
       -- Pulls tasks from the global queue into the local array, enough to fill half of it
+
+      procedure Print_States;
    private
       Global_TI_Array : Global_Task_Info_Array :=
         (others =>

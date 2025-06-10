@@ -18,3 +18,5 @@ int close_listener_socket (int lfd);
 int close_socket (int sfd);
 
 void call_perror(const char *msg);
+
+int mark_tcp_nodelay(int fd);

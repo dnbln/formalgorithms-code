@@ -27,6 +27,8 @@ package Scheduler.IO.Socket is
    procedure Write
      (Socket : in out Socket_Access; Buffer : Bytes; Count : out Natural);
 
+   procedure Mark_TCP_NoDelay (Socket : Socket_Access);
+
    procedure Wake_On_Connection_Requested
      (Sched_Cx : Scheduler.Sched_Cx_Access; Listener : Listener_Socket_Access);
 
