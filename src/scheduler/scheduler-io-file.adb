@@ -7,8 +7,6 @@ with unistd_h;
 with sys_utypes_ussize_t_h;
 
 package body Scheduler.IO.File is
-   type Mod_Int is mod 2**32;
-
    function Open_Read (Path : String) return File_Access is
       P       : Interfaces.C.Strings.chars_ptr :=
         Interfaces.C.Strings.New_String (Path);

@@ -4,6 +4,7 @@ with Interfaces.C;
 with sys_event_h;
 
 package Scheduler is
+   type Mod_Int is mod 2**32;
    type Task_Id is private;
 
    type Sched_Cx is limited private;
@@ -26,6 +27,7 @@ package Scheduler is
    procedure Cancel (Sched_Cx : Sched_Cx_Access);
 
    function Get_Available_Data (Sched_Cx : Sched_Cx_Access) return Natural;
+   function IO_EOF (Sched_Cx : Sched_Cx_Access) return Boolean;
 
    type Bytes is array (Positive range <>) of Interfaces.C.unsigned_char;
 
@@ -79,6 +81,7 @@ private
       FD           : Interfaces.C.int; -- File descriptor for the blocked IO
       Blocked_Type : Blocked_IO_Type;
       Data         : Natural;
+      EOF          : Boolean; -- Indicates if EOF has been reached
    end record;
 
    type Blocked_IO_Info_Access is access all Blocked_IO_Info;
@@ -205,4 +208,6 @@ private
 
    procedure Wake_On_IO_Write
      (Sched_Cx : Scheduler.Sched_Cx_Access; File : Interfaces.C.int);
+
+   procedure Perr (Msg : String);
 end Scheduler;

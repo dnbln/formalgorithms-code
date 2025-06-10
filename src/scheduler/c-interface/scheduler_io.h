@@ -16,3 +16,5 @@ int listen_socket (unsigned char ip[4], int port, int backlog);
 int accept_socket (int lfd);
 int close_listener_socket (int lfd);
 int close_socket (int sfd);
+
+void call_perror(const char *msg);

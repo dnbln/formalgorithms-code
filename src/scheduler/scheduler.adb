@@ -1,6 +1,7 @@
 with Ada.Calendar;            use Ada.Calendar;
 with Ada.Exceptions;
 with Ada.Text_IO;
+with Interfaces.C.Strings;    use Interfaces.C.Strings;
 with scheduler_io_h;
 with sys_utypes_uuintptr_t_h; use sys_utypes_uuintptr_t_h;
 with Interfaces.C;            use Interfaces.C;
@@ -68,9 +69,11 @@ package body Scheduler is
      (TI                         : Task_Info;
       Poll_R                     : Poll_Results;
       Result                     : out Boolean;
-      Count_Data_Available_If_IO : out Natural) is
+      Count_Data_Available_If_IO : out Natural;
+      IO_Did_EOF                 : out Boolean) is
    begin
       Count_Data_Available_If_IO := 0;
+      IO_Did_EOF := False;
       if TI.State = Blocked_Time
         and then TI.Blocked_Time /= null
         and then TI.Blocked_Time.all <= Ada.Calendar.Clock
@@ -86,6 +89,10 @@ package body Scheduler is
                --  If the task is blocked on IO and the event is ready, return True
                Result := True;
                Count_Data_Available_If_IO := Natural (Poll_R.Events (I).data);
+               IO_Did_EOF :=
+                 (Mod_Int (Poll_R.Events (I).flags)
+                  and Mod_Int (sys_event_h.EV_EOF))
+                 /= 0; -- Check if EOF flag is set
                exit;
             end if;
          end loop;
@@ -172,6 +179,9 @@ package body Scheduler is
 
          Size_QB := Size_QB + 1;
          Global_TI_B_Array (Global_Task_Info_Idx (Size_QB)) := TI;
+         if IO_Q = null then
+            IO_Q := Create_IO_Blocked_Queue;
+         end if;
          Add_Block_To_IO_Blocked_Queue (KQ => IO_Q, TI => TI);
       end Push_QB_One;
 
@@ -348,6 +358,7 @@ package body Scheduler is
          K                          : Global_Task_Info_Idx := 1;
          Is_Ready                   : Boolean := False;
          Count_Data_Available_If_IO : Natural := 0;
+         IO_Did_EOF                 : Boolean := False;
       begin
          --  Ada.Text_IO.Put_Line
          --    ("Processing Global Blocked Queue Buffer, current size: "
@@ -366,12 +377,14 @@ package body Scheduler is
               (Global_TI_B_Array (I),
                Poll_R,
                Is_Ready,
-               Count_Data_Available_If_IO);
+               Count_Data_Available_If_IO,
+               IO_Did_EOF);
             if Is_Ready then
                Global_TI_B_Array (I).State := Ready;
                if Global_TI_B_Array (I).Blocked_IO /= null then
                   Global_TI_B_Array (I).Blocked_IO.Data :=
                     Count_Data_Available_If_IO;
+                  Global_TI_B_Array (I).Blocked_IO.EOF := IO_Did_EOF;
                end if;
                -- If the task is blocked, push it back to the worker queue
                --  Ada.Text_IO.Put_Line
@@ -537,6 +550,7 @@ package body Scheduler is
          Poll_R               : Poll_Results;
          Is_Ready             : Boolean := False;
          Data_Available_If_IO : Natural := 0;
+         IO_Did_EOF           : Boolean := False;
       begin
          --  Ada.Text_IO.Put_Line
          --    ("Processing Blocked Queue Buffer, current size: "
@@ -561,11 +575,12 @@ package body Scheduler is
             --  Ada.Text_IO.Put_Line
             --    ("Current Time: " & Time_Image (Ada.Calendar.Clock));
             Task_Is_Blocked_But_Ready
-              (QB (I), Poll_R, Is_Ready, Data_Available_If_IO);
+              (QB (I), Poll_R, Is_Ready, Data_Available_If_IO, IO_Did_EOF);
             if Is_Ready then
                QB (I).State := Ready;
                if QB (I).Blocked_IO /= null then
                   QB (I).Blocked_IO.Data := Data_Available_If_IO;
+                  QB (I).Blocked_IO.EOF := IO_Did_EOF;
                end if;
                -- If the task is blocked, push it back to the worker queue
                --  Ada.Text_IO.Put_Line
@@ -1005,14 +1020,16 @@ package body Scheduler is
      (Sched_Cx : Scheduler.Sched_Cx_Access; File : Interfaces.C.int) is
    begin
       Sched_Cx.Sched_IO :=
-        new Blocked_IO_Info'(FD => File, Blocked_Type => Read, Data => 0);
+        new Blocked_IO_Info'
+          (FD => File, Blocked_Type => Read, Data => 0, EOF => False);
    end Wake_On_IO_Read;
 
    procedure Wake_On_IO_Write
      (Sched_Cx : Scheduler.Sched_Cx_Access; File : Interfaces.C.int) is
    begin
       Sched_Cx.Sched_IO :=
-        new Blocked_IO_Info'(FD => File, Blocked_Type => Write, Data => 0);
+        new Blocked_IO_Info'
+          (FD => File, Blocked_Type => Write, Data => 0, EOF => False);
    end Wake_On_IO_Write;
 
    function Get_Available_Data
@@ -1023,4 +1040,19 @@ package body Scheduler is
       end if;
       return Sched_Cx.Prev_Blocked_IO_Info.Data;
    end Get_Available_Data;
+
+   function IO_EOF (Sched_Cx : Scheduler.Sched_Cx_Access) return Boolean is
+   begin
+      if Sched_Cx.Prev_Blocked_IO_Info = null then
+         raise Constraint_Error with "Scheduler context IO info is null";
+      end if;
+      return Sched_Cx.Prev_Blocked_IO_Info.EOF;
+   end IO_EOF;
+
+   procedure Perr (Msg : String) is
+      M : chars_ptr := New_String (Msg);
+   begin
+      scheduler_io_h.call_perror (M);
+      Free (M);
+   end Perr;
 end Scheduler;

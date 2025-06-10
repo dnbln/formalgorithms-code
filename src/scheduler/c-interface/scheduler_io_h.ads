@@ -4,6 +4,7 @@ pragma Style_Checks (Off);
 pragma Warnings (Off, "-gnatwu");
 
 with Interfaces.C; use Interfaces.C;
+with Interfaces.C.Strings;
 with System;
 limited with sys_event_h;
 
@@ -46,6 +47,10 @@ package scheduler_io_h is
 
    function close_socket (sfd : int) return int  -- ./scheduler_io.h:18
    with Import => True, Convention => C, External_Name => "close_socket";
+
+   procedure call_perror
+     (msg : Interfaces.C.Strings.chars_ptr) -- ./scheduler_io.h:20
+   with Import => True, Convention => C, External_Name => "call_perror";
 
 end scheduler_io_h;
 

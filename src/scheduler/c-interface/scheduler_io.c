@@ -91,3 +91,8 @@ int close_socket(int sfd)
 {
     return close(sfd);
 }
+
+void call_perror(const char *msg)
+{
+    perror(msg);
+}

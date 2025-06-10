@@ -131,7 +131,7 @@ package body Scheduler_Demo_Sockets is
             Scheduler.IO.Socket.Read
               (F.Sock, F.Buffer (1 .. Available_Data), F.Count);
 
-            if F.Count = 0 then
+            if Scheduler.IO_EOF (Sched_Cx => Sched_Cx) then
                -- If no bytes were read, we assume the socket read is complete
                F.State := Completed;
                Put_Line

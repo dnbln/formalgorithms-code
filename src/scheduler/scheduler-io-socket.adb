@@ -12,7 +12,9 @@ package body Scheduler.IO.Socket is
       -- Implementation to connect to a socket
       Sock :=
         scheduler_io_h.listen_socket
-          (ip => Address'Address, port => Interfaces.C.int (P), backlog => 10_000);
+          (ip      => Address'Address,
+           port    => Interfaces.C.int (P),
+           backlog => 10_000);
       if Integer (Sock) < 0 then
          raise Program_Error with "Failed to connect socket";
       end if;
@@ -65,6 +67,7 @@ package body Scheduler.IO.Socket is
    begin
       Bytes_Read := unistd_h.read (Fd, Buffer'Address, Buffer'Length);
       if Bytes_Read < 0 then
+         Perr ("read");
          raise Program_Error with "Failed to read from socket";
       else
          --  Ada.Text_IO.Put_Line
@@ -84,6 +87,7 @@ package body Scheduler.IO.Socket is
    begin
       Bytes_Written := unistd_h.write (Fd, Buffer'Address, Buffer'Length);
       if Bytes_Written < 0 then
+         Perr ("write");
          raise Program_Error with "Failed to write to socket";
       end if;
       Count := Natural (Bytes_Written);
