@@ -6,7 +6,7 @@ with Scheduler.IO.File;
 with Ada.Strings;       use Ada.Strings;
 with Ada.Strings.Fixed; use Ada.Strings.Fixed;
 
-package body scheduler_demo is
+package body scheduler_demo_files is
    type Demo_Root_Future_State is (Initial, Running, Completed);
 
    type FileReadFuture_State is (Initial, Waiting, Completed);
@@ -122,4 +122,4 @@ package body scheduler_demo is
    begin
       scheduler.Spawn_RT (Future);
    end Run_Demo;
-end scheduler_demo;
+end scheduler_demo_files;

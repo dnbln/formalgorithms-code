@@ -7,6 +7,8 @@ with Interfaces.C;            use Interfaces.C;
 with sys_utypes_uint16_t_h;
 
 package body Scheduler is
+   IDLE_DELAY : constant := 0.05;  --  Idle delay in seconds, 50ms
+
    function Time_Image (T : Ada.Calendar.Time) return String is
       Year, Month, Day     : Integer;
       D                    : Ada.Calendar.Day_Duration;
@@ -687,6 +689,11 @@ package body Scheduler is
          --     & " tasks from global queue");
          return;
       end if;
+
+      -- try and steal tasks from other worker queues
+
+      -- delay 10ms if nothing else worked (no work currently)
+      delay IDLE_DELAY;
    end Enqueue_Work_From_Other_Queues;
 
    task body Worker_Task is

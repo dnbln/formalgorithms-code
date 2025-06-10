@@ -10,7 +10,8 @@ with pub_sub_int_channel;
 with Scheduler;
 
 with Scheduler_Demo_Timers;
-with scheduler_demo;
+with scheduler_demo_files;
+with Scheduler_Demo_Sockets;
 
 pragma Elaborate_All (Scheduler);
 
@@ -69,5 +70,5 @@ begin
    --  test_pub_sub.Test_Pub_Sub;
    --  Test_Coroutine.Test_Coroutine;
    --  Scheduler_Demo_Timers.Run_Demo;
-   scheduler_demo.Run_Demo;
+   Scheduler_Demo_Sockets.Run_Demo;
 end Formalgorithms;

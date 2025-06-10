@@ -57,7 +57,7 @@ private
    type Global_Task_Info_Idx is
      new Natural range 1 .. Global_Task_Info_Size_Total;
 
-   Worker_Count : constant Natural := 4;
+   Worker_Count : constant Natural := 8;
 
    type Time_Access is access all Ada.Calendar.Time;
 
