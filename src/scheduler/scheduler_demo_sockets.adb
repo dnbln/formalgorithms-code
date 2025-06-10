@@ -63,8 +63,8 @@ package body Scheduler_Demo_Sockets is
             Available_Data :=
               Scheduler.Get_Available_Data (Sched_Cx => Sched_Cx);
 
-            --  Put_Line
-            --    ("Available connections: " & Natural'Image (Available_Data));
+            Put_Line
+              ("Available connections: " & Natural'Image (Available_Data));
 
             for I in 1 .. Available_Data loop
                -- Accept a socket connection
@@ -73,7 +73,7 @@ package body Scheduler_Demo_Sockets is
                     Scheduler.IO.Socket.Accept_Socket (F.LS);
                begin
                   -- Create a new Socket Future for the accepted socket
-                  --  Put_Line ("Accepted new socket connection.");
+                  Put_Line ("Accepted new socket connection.");
                   Scheduler.Spawn
                     (Sched_Cx,
                      new Socket_Future'
@@ -152,6 +152,13 @@ package body Scheduler_Demo_Sockets is
 
          when Awaiting_Write =>
             -- Simulate writing to the socket
+            --  if F.Write_Offset >= F.Count then
+            --     F.State := Awaiting_Read;
+            --     Scheduler.IO.Socket.Wake_On_IO_Read
+            --       (Sched_Cx => Sched_Cx, Socket => F.Sock);
+            --     Finished := False;
+            --     return;
+            --  end if;
             Available_Data :=
               Scheduler.Get_Available_Data (Sched_Cx => Sched_Cx);
             Processing_Data := F.Count - F.Write_Offset;
@@ -177,6 +184,7 @@ package body Scheduler_Demo_Sockets is
             if F.Write_Offset > F.Count then
                -- Transition to Completed state
                F.State := Awaiting_Read;
+               F.Write_Offset := 1;
 
                Scheduler.IO.Socket.Wake_On_IO_Read
                  (Sched_Cx => Sched_Cx, Socket => F.Sock);

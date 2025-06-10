@@ -1,12 +1,15 @@
-import asyncio, random
+import asyncio, random, sys
 import threading
 
 
 HOST, PORT = '127.0.0.1', 8080
 CONCURRENCY = 10000
+INIT_TOTAL_TIME = 20
 SLEEP = 0.1  # seconds
-ITERATIONS = 1000
-MSG_SIZES = [16, 64, 256, 1024, 16384]
+ITERATIONS = 5
+MSG_SIZES = [16, 64, 256, 1024,
+             16384,
+             ]
 
 class AtomicInteger:
     def __init__(self, initial: int = 0):
@@ -30,31 +33,39 @@ class AtomicInteger:
         with self._lock:
             return self._value
 
+class FlushBuffer:
+    def write(self, data: str):
+        sys.stdout.buffer.write(data.encode('utf-8'))
+
+chars = list('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789')
+
 connection_counter = AtomicInteger()
+fb = FlushBuffer()
 
 async def worker(id):
-    await asyncio.sleep(random.random() * 20)
+    await asyncio.sleep(id / CONCURRENCY * INIT_TOTAL_TIME)
     reader, writer = await asyncio.open_connection(HOST, PORT)
     v = connection_counter.increment()
-    print (f'Worker {id} connected, total connections: {v}')
+    fb.write (f'Worker {id} connected, total connections: {v}\n')
     while connection_counter.get() < CONCURRENCY:
         await asyncio.sleep(1)
 
-    print(f'Worker {id} starting echo test with {ITERATIONS} iterations')
+    fb.write(f'Worker {id} starting echo test with {ITERATIONS} iterations\n')
 
-    for _ in range(ITERATIONS):
+    for it in range(ITERATIONS):
         size = random.choice(MSG_SIZES)
-        msg = bytes(random.getrandbits(8) for _ in range(size)) + b'\n'
+        msg = bytes(ord(chars[random.choice(range(len(chars)))]) for _ in range(size))
         writer.write(msg)
         await writer.drain()
         echo = await reader.readexactly(len(msg))
         if msg != echo:
-            raise ValueError(f'Worker {id} received incorrect echo: {msg} -> {echo}')
+            raise ValueError(f'Worker {id} received incorrect echo ({it} iteration): {msg} -> {echo}')
         await asyncio.sleep(SLEEP)
+        fb.write(f'Worker {id} iteration {it + 1}/{ITERATIONS} completed\n')
     writer.close()
     await writer.wait_closed()
     v = connection_counter.decrement()
-    print(f'Worker {id} disconnected, total connections: {v}')
+    fb.write(f'Worker {id} disconnected, total connections: {v}\n')
 
 async def main():
     tasks = [asyncio.create_task(worker(i)) for i in range(CONCURRENCY)]

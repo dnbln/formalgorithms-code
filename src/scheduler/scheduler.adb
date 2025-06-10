@@ -551,6 +551,14 @@ package body Scheduler is
          --     & Natural'Image (Size_QB));
          if Size > 0 then
             Tick.Current := Tick.Current + 1;
+            while Q (Local_Worker_Queue_Idx (Tick.Current)).State /= Ready loop
+               if Tick.Current = Size then
+                  raise Program_Error
+                    with "Worker Task Queue: No more tasks available";
+               end if;
+               Tick.Current := Tick.Current + 1;
+            end loop;
+            Q (Local_Worker_Queue_Idx (Tick.Current)).State := Running;
             TI := Q (Local_Worker_Queue_Idx (Tick.Current));
          --  elsif Global_Task_Queue.Has_Work_Left then
          --     Global_Task_Queue.Pull (TI => Q, Count => Size);
@@ -705,29 +713,46 @@ package body Scheduler is
       procedure Steal
         (TI : in out Local_Worker_Task_Info_Array; Count : out Natural) is
       begin
+         --  Ada.Text_IO.Put_Line
+         --    ("Worker Task Queue: Stealing tasks, current Size: "
+         --     & Natural'Image (Size));
          Count := 0;
-         if Size = 0 then
+         if Size <= 1 then
             return;
          end if;
          for I
            in Local_Worker_Queue_Idx'First .. Local_Worker_Queue_Idx (Size / 2)
          loop
-            TI (Local_Worker_Queue_Idx (Natural (TI'First) + Count)) := Q (I);
-            Count := Count + 1;
+            if Q (I).State = Ready then
+               Count := Count + 1;
+               TI (Local_Worker_Queue_Idx (Count)) := Q (I);
+               Q (I).State := Tombstone;
+            end if;
          end loop;
-
-         if Count > 0 then
-            -- Shift remaining tasks in the queue
-            for I
-              in Local_Worker_Queue_Idx'First
-                 + Local_Worker_Queue_Idx (Count)
-                 .. Local_Worker_Queue_Idx (Size)
-            loop
-               Q (I - Local_Worker_Queue_Idx (Count)) := Q (I);
-            end loop;
-            Size := Size - Count;
-         end if;
       end Steal;
+
+      procedure Steal_From
+        (Victim : access Worker_Task_Queue; Count : out Natural) is
+      begin
+         --  Ada.Text_IO.Put_Line
+         --    ("Worker Task Queue: Stealing tasks from another queue, current Size: "
+         --     & Natural'Image (Size));
+         Victim.Steal (Q, Count);
+         Size := Size + Count;
+      end Steal_From;
+
+      procedure Push_Queue (TI : Local_Worker_Task_Info_Array; Count : Natural)
+      is
+      begin
+         pragma Assert (Size = 0);
+         pragma Assert (Count > 0);
+         Size := Count;
+         for I
+           in Local_Worker_Queue_Idx'First .. Local_Worker_Queue_Idx (Count)
+         loop
+            Q (I) := TI (I);
+         end loop;
+      end Push_Queue;
 
       procedure Print_States is
       begin
@@ -829,7 +854,9 @@ package body Scheduler is
    is (Tick.Current < Tick.Count);
 
    procedure Enqueue_Work_From_Other_Queues (W_Idx : Worker_Idx) is
-      Count : Natural := 0;
+      Count  : Natural := 0;
+      Victim : access Worker_Task_Queue;
+      Q      : Local_Worker_Task_Info_Array;
    begin
       Local_Work_Task_Queues (W_Idx).Attempt_Enqueue_From_Global
         (Count => Count);
@@ -844,6 +871,43 @@ package body Scheduler is
       end if;
 
       -- try and steal tasks from other worker queues
+      for I in Worker_Idx'Range loop
+         if I /= W_Idx then
+            Victim := Local_Work_Task_Queues (I)'Access;
+            --  Ada.Text_IO.Put_Line
+            --    ("Worker Task "
+            --     & Worker_Idx'Image (W_Idx)
+            --     & " stealing from Worker Task "
+            --     & Worker_Idx'Image (I));
+            if I < W_Idx then
+               Local_Work_Task_Queues (W_Idx).Steal_From
+                 (Victim, Count => Count);
+            else
+               Victim.Steal (TI => Q, Count => Count);
+               if Count /= 0 then
+                  Local_Work_Task_Queues (W_Idx).Push_Queue
+                    (TI => Q, Count => Count);
+               end if;
+            end if;
+            if Count > 0 then
+               --  Ada.Text_IO.Put_Line
+               --    ("Worker Task "
+               --     & Worker_Idx'Image (W_Idx)
+               --     & " stole "
+               --     & Natural'Image (Count)
+               --     & " tasks from Worker Task "
+               --     & Worker_Idx'Image (I));
+               --  Ada.Text_IO.Put_Line
+               --    ("Worker Task "
+               --     & Worker_Idx'Image (W_Idx)
+               --     & " stole "
+               --     & Natural'Image (Count)
+               --     & " tasks from Worker Task "
+               --     & Worker_Idx'Image (I));
+               return;
+            end if;
+         end if;
+      end loop;
 
       -- delay 10ms if nothing else worked (no work currently)
       delay IDLE_DELAY;
@@ -917,8 +981,6 @@ package body Scheduler is
                Sch_Cx.Cancelled := False;
                Sch_Cx.Prev_Blocked_IO_Info := TI.Blocked_IO;
                Workers_Busy.Set_Busy (W_Idx, True);
-               TI.State := Running;
-               Local_Work_Task_Queues (W_Idx).Update_Tick_Task (TI, Tick);
                begin
                   TI.Fut.Poll (Sched_Cx => Sch_Cx, Finished => Finished);
                exception

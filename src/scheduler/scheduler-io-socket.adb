@@ -2,6 +2,7 @@ with scheduler_io_h;
 with Interfaces.C; use Interfaces.C;
 with unistd_h;
 with sys_utypes_ussize_t_h;
+with Ada.Text_IO;
 
 package body Scheduler.IO.Socket is
    function Connect_Socket
@@ -57,6 +58,16 @@ package body Scheduler.IO.Socket is
       end if;
    end Close;
 
+   function Buffer_As_String (Buffer : Bytes) return String is
+      use Ada.Text_IO;
+      Result : String (1 .. Buffer'Length);
+   begin
+      for I in Buffer'Range loop
+         Result (I) := Character'Val (Buffer (I));
+      end loop;
+      return Result;
+   end Buffer_As_String;
+
    procedure Read
      (Socket : in out Socket_Access;
       Buffer : in out Bytes;
@@ -74,7 +85,7 @@ package body Scheduler.IO.Socket is
          --    ("Read "
          --     & sys_utypes_ussize_t_h.ssize_t'Image (Bytes_Read)
          --     & " bytes from file with FD: "
-         --     & Interfaces.C.int'Image (Fd));
+         --     & Interfaces.C.int'Image (Fd) & ": " & Buffer_As_String (Buffer));
          Count := Natural (Bytes_Read);
       end if;
    end Read;

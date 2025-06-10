@@ -62,7 +62,13 @@ private
    type Time_Access is access all Ada.Calendar.Time;
 
    type Task_State is
-     (Ready, Running, Cancelled, Blocked_Time, Blocked_IO, Completed);
+     (Ready,
+      Running,
+      Cancelled,
+      Blocked_Time,
+      Blocked_IO,
+      Tombstone,
+      Completed);
 
    type Task_Id is new Natural;
 
@@ -157,6 +163,10 @@ private
       procedure Next_Task (TI : out Task_Info; Tick : in out Tick_Info);
       procedure Steal
         (TI : in out Local_Worker_Task_Info_Array; Count : out Natural);
+      procedure Steal_From
+        (Victim : access Worker_Task_Queue; Count : out Natural);
+      procedure Push_Queue
+        (TI : Local_Worker_Task_Info_Array; Count : Natural);
 
       procedure Print_States;
    private
@@ -169,7 +179,9 @@ private
    end Worker_Task_Queue;
 
    type Worker_Idx is new Natural range 1 .. Worker_Count;
-   Local_Work_Task_Queues : array (Worker_Idx) of Worker_Task_Queue;
+   type Local_Work_Task_Queues_Array_Type is
+     array (Worker_Idx) of aliased Worker_Task_Queue;
+   Local_Work_Task_Queues : Local_Work_Task_Queues_Array_Type;
 
    task type Worker_Task is
       entry Start (Idx : Worker_Idx);

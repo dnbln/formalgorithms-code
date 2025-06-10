@@ -9,7 +9,9 @@ project Formalgorithms is
    for Main use ("formalgorithms.adb");
 
    package Compiler is
-      for Default_Switches ("Ada") use Formalgorithms_Config.Ada_Compiler_Switches & ("-g", "-gnat12", "-gnatyg", "-gnatEb");
+      for Default_Switches ("Ada") use Formalgorithms_Config.Ada_Compiler_Switches & ("-g", "-gnat12",
+      -- "-gnatyg",
+      "-gnatEb");
    end Compiler;
 
    -- package Builder is
