@@ -3,8 +3,8 @@ import threading
 
 
 HOST, PORT = '127.0.0.1', 8080
-CONCURRENCY = 1000
-INIT_TOTAL_TIME = 2
+CONCURRENCY = 10000
+INIT_TOTAL_TIME = 20
 SLEEP = 0.1  # seconds
 ITERATIONS = 2
 MSG_SIZES = [16, 64, 256, 1024,
@@ -51,7 +51,7 @@ async def worker(id):
     while connection_counter.get() < CONCURRENCY:
         await asyncio.sleep(1)
 
-    fb.write(f'Worker {id} starting echo test with {ITERATIONS} iterations\n')
+    # fb.write(f'Worker {id} starting echo test with {ITERATIONS} iterations\n')
 
     for it in range(ITERATIONS):
         size = random.choice(MSG_SIZES)
@@ -64,7 +64,7 @@ async def worker(id):
         await asyncio.sleep(SLEEP)
         fb.write(f'Worker {id} iteration {it + 1}/{ITERATIONS} completed\n')
     writer.close()
-    fb.write(f'Worker {id} closing connection\n')
+    # fb.write(f'Worker {id} closing connection\n')
     await writer.wait_closed()
     v = connection_counter.decrement()
     fb.write(f'Worker {id} disconnected, total connections: {v}\n')

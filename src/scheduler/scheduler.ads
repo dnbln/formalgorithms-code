@@ -170,8 +170,11 @@ private
       procedure Attempt_Enqueue_From_Global (Count : out Natural);
 
       procedure Current_Task_Finished;
+      procedure Reset_Clock;
       function Has_More_Tasks return Boolean;
+      procedure Finish_Current_Task;
       procedure Next_Task (TI : out Task_Info_Access);
+      procedure Next_Task_Opt (TI : out Task_Info_Access; Set : out Boolean);
       procedure Steal
         (TI : in out Local_Worker_Task_Info_Array; Count : out Natural);
       procedure Steal_From
@@ -183,7 +186,7 @@ private
    private
       Q               : Local_Worker_Task_Info_Array;
       Size            : Natural := 0;
-      Clock_Position  : Local_Worker_Queue_Idx := 1;
+      Clock_Position  : Natural := 0;
       Stealable_Tasks : Natural := 0;
       QB              :
         Local_Worker_Task_Info_Array; -- Buffer for blocked tasks

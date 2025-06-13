@@ -543,10 +543,19 @@ package body Scheduler is
 
       end Push;
 
-      procedure Update_Tick_Task (TI : Task_Info_Access; Tick : Tick_Info) is
+      procedure Finish_Current_Task is
       begin
-         Q (Local_Worker_Queue_Idx (Tick.Current)) := TI;
-      end Update_Tick_Task;
+         --  Ada.Text_IO.Put_Line
+         --    ("Worker Task Queue: Finishing current task, current Size: "
+         --     & Natural'Image (Size)
+         --     & ", Size_QB: "
+         --     & Natural'Image (Size_QB));
+         if Clock_Position > 0 and then Clock_Position <= Size then
+            Q (Local_Worker_Queue_Idx (Clock_Position)) := null;
+         else
+            raise Program_Error with "No current task to finish";
+         end if;
+      end Finish_Current_Task;
 
       procedure Attempt_Enqueue_From_Global (Count : out Natural) is
       begin
@@ -574,9 +583,11 @@ package body Scheduler is
             Stealable_Tasks := Clock_Position;
             Clock_Position := Clock_Position + 1;
             pragma Assert (Clock_Position <= Size);
-            pragma Assert (Q (Local_Worker_Queue_Idx (Clock_Position)) /= null);
             pragma
-              Assert (Q (Local_Worker_Queue_Idx (Clock_Position)).State = Ready);
+              Assert (Q (Local_Worker_Queue_Idx (Clock_Position)) /= null);
+            pragma
+              Assert
+                (Q (Local_Worker_Queue_Idx (Clock_Position)).State = Ready);
             Q (Local_Worker_Queue_Idx (Clock_Position)).State := Running;
             TI := Q (Local_Worker_Queue_Idx (Clock_Position));
          --  elsif Global_Task_Queue.Has_Work_Left then
@@ -589,6 +600,27 @@ package body Scheduler is
 
          end if;
       end Next_Task;
+
+      procedure Reset_Clock is
+      begin
+         --  Ada.Text_IO.Put_Line
+         --    ("Worker Task Queue: Resetting clock, current Size: "
+         --     & Natural'Image (Size)
+         --     & ", Size_QB: "
+         --     & Natural'Image (Size_QB));
+         Clock_Position := 0;
+         Stealable_Tasks := 0;
+      end Reset_Clock;
+
+      procedure Next_Task_Opt (TI : out Task_Info_Access; Set : out Boolean) is
+      begin
+         if Clock_Position < Size then
+            Next_Task (TI);
+            Set := True;
+         else
+            Set := False;
+         end if;
+      end Next_Task_Opt;
 
       procedure Push_QB (TI : Task_Info_Access) is
       begin
@@ -857,9 +889,6 @@ package body Scheduler is
       end Print_States;
    end Worker_Task_Queue;
 
-   function Tick_Has_More_Work (Tick : Tick_Info) return Boolean
-   is (Tick.Current < Tick.Count);
-
    procedure Enqueue_Work_From_Other_Queues (W_Idx : Worker_Idx) is
       Count  : Natural := 0;
       Victim : access Worker_Task_Queue;
@@ -937,7 +966,7 @@ package body Scheduler is
       TI       : Task_Info_Access;
       Finished : Boolean;
       Sch_Cx   : Sched_Cx_Access;
-      Tick     : Tick_Info;
+      Has_Work : Boolean;
    begin
       accept Start (Idx : Worker_Idx) do
          W_Idx := Idx;
@@ -962,10 +991,12 @@ package body Scheduler is
             delay 0.0; -- Yield to allow other tasks to run
          end select;
          Local_Work_Task_Queues (W_Idx).Process_QB;
-         Local_Work_Task_Queues (W_Idx).Make_Tick_Info (Tick => Tick);
+         Local_Work_Task_Queues (W_Idx).Reset_Clock;
+         Local_Work_Task_Queues (W_Idx).Next_Task_Opt
+           (TI => TI, Set => Has_Work);
          --  Local_Work_Task_Queues (W_Idx).Print_States;
 
-         if not Tick_Has_More_Work (Tick) then
+         if not Has_Work then
             --  Ada.Text_IO.Put_Line
             --    ("Worker Task "
             --     & Worker_Idx'Image (W_Idx)
@@ -973,10 +1004,9 @@ package body Scheduler is
             --  Print_All_States;
             Enqueue_Work_From_Other_Queues (W_Idx => W_Idx);
          else
-            while Tick_Has_More_Work (Tick) loop
+            while Has_Work loop
                --  Ada.Text_IO.Put_Line
                --    ("Worker Task " & Worker_Idx'Image (W_Idx) & " waiting for task");
-               Local_Work_Task_Queues (W_Idx).Next_Task (TI, Tick);
                --  Local_Work_Task_Queues (W_Idx).Print_States;
                --  Ada.Text_IO.Put_Line
                --    ("Worker Task "
@@ -1035,6 +1065,9 @@ package body Scheduler is
                else
                   TI.State := Ready;
                end if;
+
+               Local_Work_Task_Queues (W_Idx).Next_Task_Opt
+                 (TI => TI, Set => Has_Work);
             end loop;
             Local_Work_Task_Queues (W_Idx).Flush_Blocked;
          end if;
