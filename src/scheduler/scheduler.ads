@@ -2,6 +2,7 @@ with Ada.Calendar;
 with Interfaces;
 with Interfaces.C;
 with sys_event_h;
+private with System.Address_To_Access_Conversions;
 
 package Scheduler is
    type Mod_Int is mod 2**32;
@@ -41,11 +42,6 @@ private
       Events : Poll_Result_Buffer; -- Array of events
    end record;
 
-   type Tick_Info is record
-      Current : Natural; -- Current tick index
-      Count   : Natural; -- Number of tasks in ready queue
-   end record;
-
    Local_Worker_Queue_Size_Total : constant Natural := 256;
    Local_Worker_Queue_Size_Half  : constant Natural :=
      Local_Worker_Queue_Size_Total / 2;
@@ -75,8 +71,15 @@ private
    protected Task_Id_Generator is
       procedure Get_Next (Id : out Task_Id);
       -- Returns the next available Task_Id
+
+      procedure Finish;
+      -- Marks that one of the tasks has finished
+
+      function All_Finished return Boolean;
+      -- Returns True if all tasks have finished
    private
       Current_Id : Task_Id := 0;
+      Finished   : Natural := 0;
    end Task_Id_Generator;
 
    function Get_Next_Task_Id return Task_Id;
@@ -91,13 +94,18 @@ private
    end record;
 
    type Blocked_IO_Info_Access is access all Blocked_IO_Info;
-   type Task_Info is record
+   type Task_Info is limited record
       Fut          : Future_Access;
       T_Id         : Task_Id;
       State        : Task_State := Ready;
       Blocked_Time : Time_Access := null;
       Blocked_IO   : Blocked_IO_Info_Access := null;
    end record;
+
+   type Task_Info_Access is access all Task_Info;
+
+   package TI_Conv is new
+     System.Address_To_Access_Conversions (Object => Task_Info);
 
    type IO_Blocked_Queue is record
       KQueue : Interfaces.C.int; -- KQueue file descriptor
@@ -108,13 +116,14 @@ private
    function Create_IO_Blocked_Queue return IO_Blocked_Queue_Access;
 
    type Local_Worker_Task_Info_Array is
-     array (Local_Worker_Queue_Idx) of Task_Info;
-   type Global_Task_Info_Array is array (Global_Task_Info_Idx) of Task_Info;
+     array (Local_Worker_Queue_Idx) of Task_Info_Access;
+   type Global_Task_Info_Array is
+     array (Global_Task_Info_Idx) of Task_Info_Access;
 
    protected Global_Task_Queue is
       function Has_Work_Left return Boolean;
 
-      procedure Push (TI : Local_Worker_Task_Info_Array);
+      procedure Push (TI : in out Local_Worker_Task_Info_Array);
       -- Pushes half of the local array into the global queue
       --  entry Pull
       --    (TI : in out Local_Worker_Task_Info_Array; Count : out Natural);
@@ -130,20 +139,22 @@ private
    private
       Global_TI_Array : Global_Task_Info_Array :=
         (others =>
-           (Fut          => Null_Future,
-            State        => Ready,
-            Blocked_Time => null,
-            Blocked_IO   => null,
-            T_Id         => 0));
+           new Task_Info'
+             (Fut          => Null_Future,
+              State        => Ready,
+              Blocked_Time => null,
+              Blocked_IO   => null,
+              T_Id         => 0));
       First, Last     : Natural := 0;
 
       Global_TI_B_Array : Global_Task_Info_Array :=
         (others =>
-           (Fut          => Null_Future,
-            State        => Ready,
-            Blocked_Time => null,
-            Blocked_IO   => null,
-            T_Id         => 0));
+           new Task_Info'
+             (Fut          => Null_Future,
+              State        => Ready,
+              Blocked_Time => null,
+              Blocked_IO   => null,
+              T_Id         => 0));
       Size_QB           : Natural := 0;
 
       IO_Q : IO_Blocked_Queue_Access := null;
@@ -151,16 +162,16 @@ private
 
    protected type Worker_Task_Queue is
       function Has_Work_Left return Boolean;
-      function Make_Tick_Info return Tick_Info;
 
-      procedure Push (TI : Task_Info);
-      procedure Push_QB (TI : Task_Info);
+      procedure Push (TI : Task_Info_Access);
+      procedure Push_QB (TI : Task_Info_Access);
       procedure Process_QB;
       procedure Flush_Blocked;
       procedure Attempt_Enqueue_From_Global (Count : out Natural);
 
-      procedure Update_Tick_Task (TI : Task_Info; Tick : Tick_Info);
-      procedure Next_Task (TI : out Task_Info; Tick : in out Tick_Info);
+      procedure Current_Task_Finished;
+      function Has_More_Tasks return Boolean;
+      procedure Next_Task (TI : out Task_Info_Access);
       procedure Steal
         (TI : in out Local_Worker_Task_Info_Array; Count : out Natural);
       procedure Steal_From
@@ -170,10 +181,13 @@ private
 
       procedure Print_States;
    private
-      Q       : Local_Worker_Task_Info_Array;
-      Size    : Natural := 0;
-      QB      : Local_Worker_Task_Info_Array; -- Buffer for blocked tasks
-      Size_QB : Natural := 0;
+      Q               : Local_Worker_Task_Info_Array;
+      Size            : Natural := 0;
+      Clock_Position  : Local_Worker_Queue_Idx := 1;
+      Stealable_Tasks : Natural := 0;
+      QB              :
+        Local_Worker_Task_Info_Array; -- Buffer for blocked tasks
+      Size_QB         : Natural := 0;
 
       IO_Q : IO_Blocked_Queue_Access := null;
    end Worker_Task_Queue;
@@ -196,20 +210,14 @@ private
       Cancelled            : Boolean := False;
    end record;
 
-   type Udata_Info is record
-      T_Id : Task_Id;                    -- Task identifier
-   end record;
-
-   type Udata_Info_Access is access all Udata_Info;
-
    procedure Add_Read_To_IO_Blocked_Queue
      (KQ     : IO_Blocked_Queue_Access;
       FD     : Interfaces.C.int;
-      T_Info : Udata_Info_Access);
+      T_Info : Task_Info_Access);
    procedure Add_Write_To_IO_Blocked_Queue
      (KQ     : IO_Blocked_Queue_Access;
       FD     : Interfaces.C.int;
-      T_Info : Udata_Info_Access);
+      T_Info : Task_Info_Access);
    procedure Remove_Read_From_IO_Blocked_Queue
      (KQ : IO_Blocked_Queue_Access; FD : Interfaces.C.int);
    procedure Remove_Write_From_IO_Blocked_Queue

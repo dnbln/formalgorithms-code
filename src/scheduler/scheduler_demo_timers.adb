@@ -1,6 +1,6 @@
 with Scheduler;
 
-with Ada.Text_IO; use Ada.Text_IO;
+with Ada.Text_IO;  use Ada.Text_IO;
 with Ada.Calendar; use Ada.Calendar;
 
 package body Scheduler_Demo_Timers is
@@ -15,9 +15,10 @@ package body Scheduler_Demo_Timers is
       Completed);
 
    type Demo_Root_Future is new scheduler.Future with record
-      State  : Demo_Root_Future_State;
-      Id     : Natural := 0;
-      Result : Boolean := False;
+      State           : Demo_Root_Future_State;
+      Id              : Natural := 0;
+      Result          : Boolean := False;
+      Wait_One_Target : Ada.Calendar.Time := Ada.Calendar.Clock;
    end record;
 
    overriding
@@ -36,7 +37,10 @@ package body Scheduler_Demo_Timers is
                  (Sched_Cx => Sched_Cx,
                   F        =>
                     new Demo_Root_Future'
-                      (State => Running, Id => I, Result => False));
+                      (State           => Running,
+                       Id              => I,
+                       Result          => False,
+                       Wait_One_Target => F.Wait_One_Target));
             end loop;
 
             Finished := False;
@@ -55,7 +59,7 @@ package body Scheduler_Demo_Timers is
             -- Wait for a condition or event
             --  Put_Line ("Demo Root Future is waiting...");
             scheduler.Wake_In_Future
-              (Sched_Cx => Sched_Cx, Time => Ada.Calendar.Clock + 5.0);
+              (Sched_Cx => Sched_Cx, Time => F.Wait_One_Target);
             F.State := Waiting;
             Finished := False;
 
@@ -82,7 +86,7 @@ package body Scheduler_Demo_Timers is
             -- Wait again for some condition or event
             Put_Line ("Demo Root Future is waiting again...");
             scheduler.Wake_In_Future
-              (Sched_Cx => Sched_Cx, Time => Ada.Calendar.Clock + 1.0);
+              (Sched_Cx => Sched_Cx, Time => Ada.Calendar.Clock + 5.0);
             F.State := Waiting_Again;
             Finished := False;
 
@@ -101,7 +105,11 @@ package body Scheduler_Demo_Timers is
 
    procedure Run_Demo is
       Future : scheduler.Future_Access :=
-        new Demo_Root_Future'(State => Initial, Id => 0, Result => False);
+        new Demo_Root_Future'
+          (State           => Initial,
+           Id              => 0,
+           Result          => False,
+           Wait_One_Target => Ada.Calendar.Clock + 2.0);
    begin
       scheduler.Spawn_RT (Future);
    end Run_Demo;

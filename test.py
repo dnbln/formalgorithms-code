@@ -3,10 +3,10 @@ import threading
 
 
 HOST, PORT = '127.0.0.1', 8080
-CONCURRENCY = 10000
-INIT_TOTAL_TIME = 20
+CONCURRENCY = 1000
+INIT_TOTAL_TIME = 2
 SLEEP = 0.1  # seconds
-ITERATIONS = 5
+ITERATIONS = 2
 MSG_SIZES = [16, 64, 256, 1024,
              16384,
              ]
@@ -35,7 +35,8 @@ class AtomicInteger:
 
 class FlushBuffer:
     def write(self, data: str):
-        sys.stdout.buffer.write(data.encode('utf-8'))
+        # sys.stdout.buffer.write(data.encode('utf-8'))
+        print(data, end='')
 
 chars = list('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789')
 
@@ -63,6 +64,7 @@ async def worker(id):
         await asyncio.sleep(SLEEP)
         fb.write(f'Worker {id} iteration {it + 1}/{ITERATIONS} completed\n')
     writer.close()
+    fb.write(f'Worker {id} closing connection\n')
     await writer.wait_closed()
     v = connection_counter.decrement()
     fb.write(f'Worker {id} disconnected, total connections: {v}\n')
