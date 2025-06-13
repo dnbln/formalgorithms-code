@@ -692,7 +692,7 @@ package body Scheduler is
             end if;
          end loop;
          Size := K;
-         Stealable_Tasks := 0;
+         Reset_Clock;
       end Flush_Blocked;
 
       procedure Process_QB is
@@ -991,7 +991,6 @@ package body Scheduler is
             delay 0.0; -- Yield to allow other tasks to run
          end select;
          Local_Work_Task_Queues (W_Idx).Process_QB;
-         Local_Work_Task_Queues (W_Idx).Reset_Clock;
          Local_Work_Task_Queues (W_Idx).Next_Task_Opt
            (TI => TI, Set => Has_Work);
          --  Local_Work_Task_Queues (W_Idx).Print_States;

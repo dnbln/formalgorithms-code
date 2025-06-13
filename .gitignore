@@ -21,3 +21,4 @@ obj
 /b.txt
 /example*.txt
 /.direnv
+/data*.txt
