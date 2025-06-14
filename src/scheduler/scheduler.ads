@@ -166,6 +166,7 @@ private
       procedure Push (TI : Task_Info_Access);
       procedure Push_QB (TI : Task_Info_Access);
       procedure Process_QB;
+      procedure Process_QB_And_Fetch_First (TI : out Task_Info_Access; Set : out Boolean);
       procedure Flush_Blocked;
       procedure Attempt_Enqueue_From_Global (Count : out Natural);
 

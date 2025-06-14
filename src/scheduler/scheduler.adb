@@ -622,6 +622,13 @@ package body Scheduler is
          end if;
       end Next_Task_Opt;
 
+      procedure Process_QB_And_Fetch_First
+        (TI : out Task_Info_Access; Set : out Boolean) is
+      begin
+         Process_QB;
+         Next_Task_Opt (TI => TI, Set => Set);
+      end Process_QB_And_Fetch_First;
+
       procedure Push_QB (TI : Task_Info_Access) is
       begin
          pragma Assert (TI.State = Blocked_Time or else TI.State = Blocked_IO);
@@ -990,8 +997,7 @@ package body Scheduler is
          or
             delay 0.0; -- Yield to allow other tasks to run
          end select;
-         Local_Work_Task_Queues (W_Idx).Process_QB;
-         Local_Work_Task_Queues (W_Idx).Next_Task_Opt
+         Local_Work_Task_Queues (W_Idx).Process_QB_And_Fetch_First
            (TI => TI, Set => Has_Work);
          --  Local_Work_Task_Queues (W_Idx).Print_States;
 
