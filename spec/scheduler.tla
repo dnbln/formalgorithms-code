@@ -73,7 +73,7 @@ variables
     GQB = [p \in GQ |-> NullTask]; \* Global blocked queue
     GQBSize = 0; \* Global blocked queue size
     
-    GQLock = NullLock;
+    GQLock = NullLock; \* Lock for the global queue
     
     \** Local queues
     LQA = [w \in Workers |-> [p \in LQ |-> NullTask]]; \* Local active queues
@@ -82,7 +82,7 @@ variables
     LQB = [w \in Workers |-> [p \in LQ |-> NullTask]]; \* Local blocked queues
     LQBSizes = [w \in Workers |-> 0]; \* Local blocked queue sizes
     
-    LQLocks = [w \in Workers |-> NullLock];
+    LQLocks = [w \in Workers |-> NullLock]; \* Locks for the local queues
     
     \** Task id generator
     TaskIdCurrent = 0; \* Task id generator current
@@ -90,8 +90,8 @@ variables
     
     RTStarted = FALSE; \* set to TRUE when the runtime initialized and the worker threads can start
     RTStopped = FALSE; \* set to TRUE when all tasks are done, according to TasksFinished 
-    Futures = [f \in AllFutures |-> FSNew]; \* Futures, for synchronization
-    FuturePush = [w \in Workers |-> NullFuture];
+    Futures = [f \in AllFutures |-> FSNew]; \* Futures, for synchronization. Futures are their own processes, `Poll` is an await in that process
+    FuturePush = [w \in Workers |-> NullFuture]; \* Futures to spawn, implements `Spawn(Sch_Cx, Future)` from Ada in a separate process
 
 define
     AllTasksDone == RTStarted = TRUE /\ TaskIdCurrent = TasksFinished
@@ -100,9 +100,11 @@ define
         /\ \A t \in TaskPusherProcesses: pc[t] = "Done"
     WorkersStopOnceRTFlags == RTStopped => <>AllWorkersFinished
     RTStopFlaggedOnceAllTasksDone == AllTasksDone => <>RTStopped
+    EventuallyAllTasksFinish == <>AllTasksDone
     Correct ==
         /\ WorkersStopOnceRTFlags
         /\ RTStopFlaggedOnceAllTasksDone
+        /\ EventuallyAllTasksFinish
     TypeInvariant ==
         /\ GQA \in GQType
         /\ GQB \in GQType
@@ -136,11 +138,8 @@ begin
         LQASizes[1] := 1;
     RTStart:
         RTStarted := TRUE;
-    RTLoopCheck:
-        while (TaskIdCurrent # TasksFinished) do
-            skip;
-        end while;
     RTFinish:
+        await TaskIdCurrent = TasksFinished;
         RTStopped := TRUE;
 end process;
 
@@ -165,6 +164,7 @@ begin
             ProcessQB_LQ_Lock:
                 await LQLocks[self] = NullLock;
                 LQLocks[self] := self;
+                \* TODO: poll LQB kqueue
                 
             \* fetch next task (opt)
             LQ_Pull:
@@ -180,7 +180,7 @@ begin
                 LQLocks[self] := NullLock;
             CheckHasWork:
                 if HasWork = FALSE then
-                    \* enqueue from other queues
+                    \* TODO: enqueue from other queues
                     skip;
                 else
                     Has_Work_Loop:
@@ -237,7 +237,7 @@ begin
                     LQ_Flush_Continue:
                         if LQA[self][I].state = TSReady then
                             K := K + 1;
-                            LQA[self][K + 1] := LQA[self][I];
+                            LQA[self][K] := LQA[self][I];
                         else
                             if LQA[self][I].state \in {TSBTimer, TSBIO} then
                                 LQB[self][LQBSizes[self]] := LQA[self][I];
@@ -280,6 +280,7 @@ begin
                     TPPLockGQ:
                         await GQLock = NullLock;
                         GQLock := wr;
+                        I := 1;
                     TPPPushGQLoop:
                         while I < LQSize \div 2 do
                         TPPPushGQStatusCheck:
@@ -346,9 +347,9 @@ end process;
 \*        Futures[self] := FSCompleted;
 \*end process;
 end algorithm; *)
-\* BEGIN TRANSLATION (chksum(pcal) = "77d8d6e7" /\ chksum(tla) = "78155665")
-\* Process variable tid of process RTSpawn at line 129 col 5 changed to tid_
-\* Process variable I of process WorkerThread at line 151 col 5 changed to I_
+\* BEGIN TRANSLATION (chksum(pcal) = "5a96d9cc" /\ chksum(tla) = "36cb302e")
+\* Process variable tid of process RTSpawn at line 131 col 5 changed to tid_
+\* Process variable I of process WorkerThread at line 150 col 5 changed to I_
 VARIABLES pc, GQA, GQAFirst, GQALast, GQB, GQBSize, GQLock, LQA, LQAClock, 
           LQASizes, LQB, LQBSizes, LQLocks, TaskIdCurrent, TasksFinished, 
           RTStarted, RTStopped, Futures, FuturePush
@@ -360,9 +361,11 @@ AllWorkersFinished ==
     /\ \A t \in TaskPusherProcesses: pc[t] = "Done"
 WorkersStopOnceRTFlags == RTStopped => <>AllWorkersFinished
 RTStopFlaggedOnceAllTasksDone == AllTasksDone => <>RTStopped
+EventuallyAllTasksFinish == <>AllTasksDone
 Correct ==
     /\ WorkersStopOnceRTFlags
     /\ RTStopFlaggedOnceAllTasksDone
+    /\ EventuallyAllTasksFinish
 TypeInvariant ==
     /\ GQA \in GQType
     /\ GQB \in GQType
@@ -446,25 +449,15 @@ RTSpawnInit == /\ pc[0] = "RTSpawnInit"
 
 RTStart == /\ pc[0] = "RTStart"
            /\ RTStarted' = TRUE
-           /\ pc' = [pc EXCEPT ![0] = "RTLoopCheck"]
+           /\ pc' = [pc EXCEPT ![0] = "RTFinish"]
            /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, GQLock, LQA, 
                            LQAClock, LQASizes, LQB, LQBSizes, LQLocks, 
                            TaskIdCurrent, TasksFinished, RTStopped, Futures, 
                            FuturePush, tid_, task, HasWork, I_, K, wr, tid, I, 
                            ListenerSocketFd >>
 
-RTLoopCheck == /\ pc[0] = "RTLoopCheck"
-               /\ IF (TaskIdCurrent # TasksFinished)
-                     THEN /\ TRUE
-                          /\ pc' = [pc EXCEPT ![0] = "RTLoopCheck"]
-                     ELSE /\ pc' = [pc EXCEPT ![0] = "RTFinish"]
-               /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, GQLock, 
-                               LQA, LQAClock, LQASizes, LQB, LQBSizes, LQLocks, 
-                               TaskIdCurrent, TasksFinished, RTStarted, 
-                               RTStopped, Futures, FuturePush, tid_, task, 
-                               HasWork, I_, K, wr, tid, I, ListenerSocketFd >>
-
 RTFinish == /\ pc[0] = "RTFinish"
+            /\ TaskIdCurrent = TasksFinished
             /\ RTStopped' = TRUE
             /\ pc' = [pc EXCEPT ![0] = "Done"]
             /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, GQLock, LQA, 
@@ -473,7 +466,7 @@ RTFinish == /\ pc[0] = "RTFinish"
                             FuturePush, tid_, task, HasWork, I_, K, wr, tid, I, 
                             ListenerSocketFd >>
 
-RTSpawn == RTGetNext \/ RTSpawnInit \/ RTStart \/ RTLoopCheck \/ RTFinish
+RTSpawn == RTGetNext \/ RTSpawnInit \/ RTStart \/ RTFinish
 
 WWait(self) == /\ pc[self] = "WWait"
                /\ RTStarted = TRUE
@@ -710,7 +703,7 @@ LQ_Flush_Loop_Inner(self) == /\ pc[self] = "LQ_Flush_Loop_Inner"
 LQ_Flush_Continue(self) == /\ pc[self] = "LQ_Flush_Continue"
                            /\ IF LQA[self][I_[self]].state = TSReady
                                  THEN /\ K' = [K EXCEPT ![self] = K[self] + 1]
-                                      /\ LQA' = [LQA EXCEPT ![self][K'[self] + 1] = LQA[self][I_[self]]]
+                                      /\ LQA' = [LQA EXCEPT ![self][K'[self]] = LQA[self][I_[self]]]
                                       /\ LQB' = LQB
                                  ELSE /\ IF LQA[self][I_[self]].state \in {TSBTimer, TSBIO}
                                             THEN /\ LQB' = [LQB EXCEPT ![self][LQBSizes[self]] = LQA[self][I_[self]]]
@@ -831,13 +824,13 @@ TPPCheckLQSize(self) == /\ pc[self] = "TPPCheckLQSize"
 TPPLockGQ(self) == /\ pc[self] = "TPPLockGQ"
                    /\ GQLock = NullLock
                    /\ GQLock' = wr[self]
+                   /\ I' = [I EXCEPT ![self] = 1]
                    /\ pc' = [pc EXCEPT ![self] = "TPPPushGQLoop"]
                    /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, LQA, 
                                    LQAClock, LQASizes, LQB, LQBSizes, LQLocks, 
                                    TaskIdCurrent, TasksFinished, RTStarted, 
                                    RTStopped, Futures, FuturePush, tid_, task, 
-                                   HasWork, I_, K, wr, tid, I, 
-                                   ListenerSocketFd >>
+                                   HasWork, I_, K, wr, tid, ListenerSocketFd >>
 
 TPPPushGQLoop(self) == /\ pc[self] = "TPPPushGQLoop"
                        /\ IF I[self] < LQSize \div 2
@@ -1012,5 +1005,5 @@ Termination == <>(\A self \in ProcSet: pc[self] = "Done")
 
 =============================================================================
 \* Modification History
-\* Last modified Sat Jun 14 19:42:46 CEST 2025 by dinu
+\* Last modified Sat Jun 14 20:44:35 CEST 2025 by dinu
 \* Created Sat May 24 12:56:52 CEST 2025 by dinu

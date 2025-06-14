@@ -61,6 +61,11 @@ package body Scheduler is
 
          return (Finished = Natural (Current_Id));
       end All_Finished;
+
+      entry Wait_All_Finished when All_Finished is
+      begin
+         null;
+      end Wait_All_Finished;
    end Task_Id_Generator;
 
    function Get_Next_Task_Id return Task_Id is
@@ -1106,14 +1111,7 @@ package body Scheduler is
       end loop;
 
       -- Wait for all workers to complete
-      loop
-         if Task_Id_Generator.All_Finished then
-            Ada.Text_IO.Put_Line ("No work left, exiting...");
-            exit;
-         end if;
-
-         delay 1.0; -- Check every second
-      end loop;
+      Task_Id_Generator.Wait_All_Finished;
 
       for I in Workers'Range loop
          Workers (I).Stop;

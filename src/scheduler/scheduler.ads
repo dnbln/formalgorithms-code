@@ -77,6 +77,9 @@ private
 
       function All_Finished return Boolean;
       -- Returns True if all tasks have finished
+
+      entry Wait_All_Finished;
+      -- Waits until all tasks have finished
    private
       Current_Id : Task_Id := 0;
       Finished   : Natural := 0;
