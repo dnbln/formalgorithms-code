@@ -1106,10 +1106,7 @@ package body Scheduler is
             exit;
          end if;
 
-         delay 0.01; -- Yield to allow other tasks to run
-         --  Ada.Text_IO.Put_Line
-         --    ("Waiting for workers to finish, work left: "
-         --     & Boolean'Image (Work_Left));
+         delay 1.0; -- Check every second
       end loop;
 
       for I in Workers'Range loop
