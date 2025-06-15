@@ -5,20 +5,21 @@
     <stringAttribute key="distributedNetworkInterface" value="192.168.2.4"/>
     <intAttribute key="distributedNodesCount" value="1"/>
     <stringAttribute key="distributedTLC" value="off"/>
-    <intAttribute key="fpIndex" value="92"/>
+    <intAttribute key="fpIndex" value="5"/>
     <intAttribute key="maxHeapSize" value="25"/>
     <stringAttribute key="modelBehaviorInit" value=""/>
     <stringAttribute key="modelBehaviorNext" value=""/>
     <stringAttribute key="modelBehaviorSpec" value="Spec"/>
     <intAttribute key="modelBehaviorSpecType" value="1"/>
-    <stringAttribute key="modelBehaviorVars" value="TaskIdCurrent, TasksFinished, I_, RTStarted, I, K, LQBSizes, HasWork, GQAFirst, Futures, pc, LQA, LQB, LQASizes, RTStopped, LQAClock, LQLocks, GQALast, FuturePush, tid_, tid, GQLock, task, GQA, GQB, wr, GQBSize, ListenerSocketFd"/>
+    <stringAttribute key="modelBehaviorVars" value="TaskIdCurrent, TasksFinished, I_, RTStarted, I, K, LQBSizes, HasWork, GQAFirst, Futures, pc, FDReadsAvailable, LQA, LQB, LQASizes, RTStopped, LQAClock, LQLocks, GQALast, FuturePush, tid_, tid, GQLock, task, GQA, GQB, FDWritesAvailable, wr, GQBSize, ListenerSocketFd, KQueues"/>
     <stringAttribute key="modelComments" value=""/>
     <booleanAttribute key="modelCorrectnessCheckDeadlock" value="true"/>
     <listAttribute key="modelCorrectnessInvariants">
         <listEntry value="1TypeInvariant"/>
+        <listEntry value="1Safety"/>
     </listAttribute>
     <listAttribute key="modelCorrectnessProperties">
-        <listEntry value="1Correct"/>
+        <listEntry value="1Liveness"/>
     </listAttribute>
     <intAttribute key="modelEditorOpenTabs" value="8"/>
     <stringAttribute key="modelExpressionEval" value=""/>
@@ -30,6 +31,7 @@
         <listEntry value="NumConnections;;4;0;0"/>
         <listEntry value="NullLock;;NullLock;1;0"/>
         <listEntry value="NullFuture;;NullFuture;1;0"/>
+        <listEntry value="NullKQ;;NullKQ;1;0"/>
     </listAttribute>
     <intAttribute key="modelVersion" value="20191005"/>
     <intAttribute key="numberOfWorkers" value="4"/>
