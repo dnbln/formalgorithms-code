@@ -4,4 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-tokio = { version = "1.44", features = ["full"] }
+tokio = { git = "https://github.com/tokio-rs/tokio", rev = "99a03a502eb69309024406b07c85cabb965f53d4", features = ["full"] }
+
+[[bin]]
+name = "io-bench-tokio-client"
+path = "src/client.rs"

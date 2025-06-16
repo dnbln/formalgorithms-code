@@ -127,6 +127,7 @@ private
       function Has_Work_Left return Boolean;
 
       procedure Push (TI : in out Local_Worker_Task_Info_Array);
+      procedure Push_One (TI : Task_Info_Access);
       -- Pushes half of the local array into the global queue
       --  entry Pull
       --    (TI : in out Local_Worker_Task_Info_Array; Count : out Natural);
@@ -176,7 +177,6 @@ private
       procedure Current_Task_Finished;
       procedure Reset_Clock;
       function Has_More_Tasks return Boolean;
-      procedure Finish_Current_Task;
       procedure Next_Task (TI : out Task_Info_Access);
       procedure Next_Task_Opt (TI : out Task_Info_Access; Set : out Boolean);
       procedure Steal
@@ -191,7 +191,7 @@ private
       Q               : Local_Worker_Task_Info_Array;
       Size            : Natural := 0;
       Clock_Position  : Natural := 0;
-      Stealable_Tasks : Natural := 0;
+      Stealable_Tasks : Natural := Local_Worker_Queue_Size_Total;
       QB              :
         Local_Worker_Task_Info_Array; -- Buffer for blocked tasks
       Size_QB         : Natural := 0;

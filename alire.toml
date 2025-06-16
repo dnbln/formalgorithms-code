@@ -11,15 +11,3 @@ tags = []
 
 [[depends-on]]
 gnatprove = "^14.1.1"
-
-[[depends-on]]
-coroutines = "*"
-
-[[depends-on]]
-pcl = "*"
-
-[[pins]]
-coroutines = { url='git+https://github.com/pmderodat/ada-generators', subdir='coroutines' }
-
-[[pins]]
-pcl = { url='git+https://github.com/pmderodat/ada-generators', subdir='pcl' }

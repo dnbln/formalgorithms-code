@@ -47,8 +47,8 @@ package body Scheduler_Demo_Sockets is
 
             -- Here you would typically set up socket connections or similar
             -- operations. For demonstration, we will just print a message.
-            Put_Line
-              ("Demo Root Future initialized, transitioning to Running state.");
+            --  Put_Line
+            --    ("Demo Root Future initialized, transitioning to Running state.");
 
             Scheduler.IO.Socket.Wake_On_Connection_Requested
               (Sched_Cx => Sched_Cx, Listener => F.LS);
@@ -57,21 +57,24 @@ package body Scheduler_Demo_Sockets is
 
          when Accepting =>
             -- Simulate some work being done
-            Put_Line ("Running Demo Root Future...");
+            --  Put_Line ("Running Demo Root Future...");
 
             --- Gives us the number of connections in the backlog
             Available_Data :=
               Scheduler.Get_Available_Data (Sched_Cx => Sched_Cx);
 
-            Put_Line
-              ("Available connections: " & Natural'Image (Available_Data));
+            --  Put_Line
+            --    ("Available connections: " & Natural'Image (Available_Data));
 
             for I in 1 .. Available_Data loop
                -- Accept a socket connection
+               Ada.Text_IO.Put_Line
+                 ("Accepting new socket connection... " & Integer'Image (I));
                declare
                   New_Sock : Scheduler.IO.Socket.Socket_Access :=
                     Scheduler.IO.Socket.Accept_Socket (F.LS);
                begin
+
                   -- Create a new Socket Future for the accepted socket
                   Put_Line ("Accepted new socket connection.");
                   Scheduler.Spawn
@@ -91,7 +94,7 @@ package body Scheduler_Demo_Sockets is
          when Completed =>
             -- Finalize the task
             Scheduler.IO.Socket.Close_Listener (F.LS);
-            Put_Line ("Demo Root Future completed.");
+            --  Put_Line ("Demo Root Future completed.");
             Finished := True;
       end case;
    end Poll;
@@ -107,9 +110,9 @@ package body Scheduler_Demo_Sockets is
    begin
       case F.State is
          when Initial =>
-            Put_Line
-              ("Socket Future initialized, transitioning to Running state.");
-            Scheduler.IO.Socket.Mark_TCP_NoDelay (F.Sock);
+            --  Put_Line
+            --    ("Socket Future initialized, transitioning to Running state.");
+            --  Scheduler.IO.Socket.Mark_TCP_NoDelay (F.Sock);
             -- Transition to Running state
             F.State := Awaiting_Read;
 
@@ -238,7 +241,7 @@ package body Scheduler_Demo_Sockets is
 
          when Completed =>
             -- Finalize the task
-            Put_Line ("Socket Future completed.");
+            --  Put_Line ("Socket Future completed.");
             Scheduler.IO.Socket.Close (F.Sock);
             Finished := True;
       end case;

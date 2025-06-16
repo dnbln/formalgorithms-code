@@ -122,15 +122,20 @@ define
     EventuallyAllTasksFinish == <>AllTasksDone
     
     Safety ==
-        /\ TRUE
+        /\ GQAFirst <= GQALast
+        /\ TaskIdCurrent <= TasksFinished
     
     Liveness ==
         /\ WorkersStopOnceRTFlags
         /\ RTStopFlaggedOnceAllTasksDone
         /\ EventuallyAllTasksFinish
+
     TypeInvariant ==
         /\ GQA \in GQType
+        /\ GQAFirst \in 0..GQSize * 2
+        /\ GQALast \in 0..GQSize * 2
         /\ GQB \in GQType
+        /\ GQBSize \in 0..GQSize
         /\ GQLock \in GQLockType
         /\ LQA \in LQGlobalType
         /\ LQAClock \in LQSizesType
@@ -138,6 +143,8 @@ define
         /\ LQB \in LQGlobalType
         /\ LQBSizes \in LQSizesType
         /\ LQLocks \in LQLocksType
+        /\ TaskIdCurrent \in Nat
+        /\ TasksFinished \in Nat
         /\ RTStarted \in BOOLEAN
         /\ RTStopped \in BOOLEAN
         /\ Futures \in FuturesListType
@@ -408,9 +415,9 @@ begin
 end process;
 
 end algorithm; *)
-\* BEGIN TRANSLATION (chksum(pcal) = "414b9b8f" /\ chksum(tla) = "7a79b57f")
-\* Process variable tid of process RTSpawn at line 154 col 5 changed to tid_
-\* Process variable I of process WorkerThread at line 173 col 5 changed to I_
+\* BEGIN TRANSLATION (chksum(pcal) = "fbef9e8" /\ chksum(tla) = "5da98d62")
+\* Process variable tid of process RTSpawn at line 161 col 5 changed to tid_
+\* Process variable I of process WorkerThread at line 180 col 5 changed to I_
 VARIABLES pc, GQA, GQAFirst, GQALast, GQB, GQBSize, GQLock, LQA, LQAClock, 
           LQASizes, LQB, LQBSizes, LQLocks, TaskIdCurrent, TasksFinished, 
           RTStarted, RTStopped, Futures, FuturePush, FDReadsAvailable, 
@@ -426,15 +433,20 @@ RTStopFlaggedOnceAllTasksDone == AllTasksDone => <>RTStopped
 EventuallyAllTasksFinish == <>AllTasksDone
 
 Safety ==
-    /\ TRUE
+    /\ GQAFirst <= GQALast
+    /\ TaskIdCurrent <= TasksFinished
 
 Liveness ==
     /\ WorkersStopOnceRTFlags
     /\ RTStopFlaggedOnceAllTasksDone
     /\ EventuallyAllTasksFinish
+
 TypeInvariant ==
     /\ GQA \in GQType
+    /\ GQAFirst \in 0..GQSize * 2
+    /\ GQALast \in 0..GQSize * 2
     /\ GQB \in GQType
+    /\ GQBSize \in 0..GQSize
     /\ GQLock \in GQLockType
     /\ LQA \in LQGlobalType
     /\ LQAClock \in LQSizesType
@@ -442,6 +454,8 @@ TypeInvariant ==
     /\ LQB \in LQGlobalType
     /\ LQBSizes \in LQSizesType
     /\ LQLocks \in LQLocksType
+    /\ TaskIdCurrent \in Nat
+    /\ TasksFinished \in Nat
     /\ RTStarted \in BOOLEAN
     /\ RTStopped \in BOOLEAN
     /\ Futures \in FuturesListType
@@ -1254,5 +1268,5 @@ Termination == <>(\A self \in ProcSet: pc[self] = "Done")
 
 =============================================================================
 \* Modification History
-\* Last modified Sun Jun 15 08:15:16 CEST 2025 by dinu
+\* Last modified Sun Jun 15 15:51:09 CEST 2025 by dinu
 \* Created Sat May 24 12:56:52 CEST 2025 by dinu
