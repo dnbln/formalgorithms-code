@@ -125,17 +125,9 @@ package body Scheduler_Demo_Sockets is
             Finished := False;
 
          when Awaiting_Read =>
-            -- Compute number of bytes to read
-            Available_Data :=
-              Scheduler.Get_Available_Data (Sched_Cx => Sched_Cx);
-            Processing_Data := Available_Data;
-            if F.Buffer'Length < Processing_Data then
-               Processing_Data := F.Buffer'Length;
-            end if;
-
             -- read data from the socket
             Scheduler.IO.Socket.Read
-              (F.Sock, F.Buffer (1 .. Processing_Data), F.Count);
+              (F.Sock, F.Buffer, F.Count);
             F.Write_Offset := 1;
 
             if Scheduler.IO_EOF (Sched_Cx => Sched_Cx) then

@@ -175,6 +175,9 @@ package body Scheduler is
             Remove_Read_From_IO_Blocked_Queue (KQ => KQ, FD => B_Info.FD);
 
          when Write =>
+            Ada.Text_IO.Put_Line
+              ("Removing write block from IO blocked queue for FD: "
+               & Interfaces.C.int'Image (B_Info.FD));
             Remove_Write_From_IO_Blocked_Queue (KQ => KQ, FD => B_Info.FD);
       end case;
    end Remove_Block_From_IO_Blocked_Queue;
@@ -787,7 +790,7 @@ package body Scheduler is
          end if;
          for I
            in reverse Local_Worker_Queue_Idx (Stealable_Tasks)
-              .. Local_Worker_Queue_Idx (Size)
+                      .. Local_Worker_Queue_Idx (Size)
          loop
             if Q (I) /= null and then Q (I).State = Ready then
                --  Ada.Text_IO.Put_Line
@@ -1237,6 +1240,7 @@ package body Scheduler is
         scheduler_io_h.unregister_event
           (KQ.KQueue, FD, sys_event_h.EVFILT_WRITE);
       if Integer (Result) < 0 then
+         Perr ("kqueue");
          raise Program_Error with "Error unregistering write event";
       end if;
    end Remove_Write_From_IO_Blocked_Queue;
