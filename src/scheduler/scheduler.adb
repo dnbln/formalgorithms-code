@@ -530,23 +530,21 @@ package body Scheduler is
          --     & Natural'Image (Size_QB));
 
          if Size = Local_Worker_Queue_Size_Total then
-            Global_Task_Queue.Push_One (TI);
-         --  Size := Local_Worker_Queue_Size_Half;
-         --  if Clock_Position > Size
-         --    and then Clock_Position <= Local_Worker_Queue_Size_Total
-         --  then
-         --     Size := Size + 1;
-         --     Q (Local_Worker_Queue_Idx (Size)) :=
-         --       Q (Local_Worker_Queue_Idx (Clock_Position));
-         --     Q (Local_Worker_Queue_Idx (Clock_Position)) := null;
-         --     Clock_Position := Size;
-         --  end if;
-
-         else
-            Size := Size + 1;
-            Q (Local_Worker_Queue_Idx (Size)) := TI;
+            Global_Task_Queue.Push (Q);
+            Size := Local_Worker_Queue_Size_Half;
+            if Clock_Position > Size
+              and then Clock_Position <= Local_Worker_Queue_Size_Total
+            then
+               Size := Size + 1;
+               Q (Local_Worker_Queue_Idx (Size)) :=
+                 Q (Local_Worker_Queue_Idx (Clock_Position));
+               Q (Local_Worker_Queue_Idx (Clock_Position)) := null;
+               Clock_Position := Size;
+            end if;
          end if;
 
+         Size := Size + 1;
+         Q (Local_Worker_Queue_Idx (Size)) := TI;
       end Push;
 
       procedure Attempt_Enqueue_From_Global (Count : out Natural) is
@@ -850,17 +848,17 @@ package body Scheduler is
                      & Task_Id'Image (Q (I).T_Id)
                      & ": State = "
                      & Task_State'Image (Q (I).State));
-                  if QB (I).Blocked_IO /= null then
+                  if Q (I).Blocked_IO /= null then
                      Ada.Text_IO.Put_Line
                        ("Blocked IO: FD = "
-                        & Integer'Image (Integer (QB (I).Blocked_IO.FD))
+                        & Integer'Image (Integer (Q (I).Blocked_IO.FD))
                         & ", Type = "
                         & Blocked_IO_Type'Image
-                            (QB (I).Blocked_IO.Blocked_Type)
+                            (Q (I).Blocked_IO.Blocked_Type)
                         & ", Data = "
-                        & Natural'Image (QB (I).Blocked_IO.Data)
+                        & Natural'Image (Q (I).Blocked_IO.Data)
                         & ", EOF = "
-                        & Boolean'Image (QB (I).Blocked_IO.EOF));
+                        & Boolean'Image (Q (I).Blocked_IO.EOF));
                   else
                      Ada.Text_IO.Put_Line ("Blocked IO: null");
                   end if;

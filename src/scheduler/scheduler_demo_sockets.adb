@@ -68,15 +68,15 @@ package body Scheduler_Demo_Sockets is
 
             for I in 1 .. Available_Data loop
                -- Accept a socket connection
-               Ada.Text_IO.Put_Line
-                 ("Accepting new socket connection... " & Integer'Image (I));
+               --  Ada.Text_IO.Put_Line
+               --    ("Accepting new socket connection... " & Integer'Image (I));
                declare
                   New_Sock : Scheduler.IO.Socket.Socket_Access :=
                     Scheduler.IO.Socket.Accept_Socket (F.LS);
                begin
 
                   -- Create a new Socket Future for the accepted socket
-                  Put_Line ("Accepted new socket connection.");
+                  --  Put_Line ("Accepted new socket connection.");
                   Scheduler.Spawn
                     (Sched_Cx,
                      new Socket_Future'

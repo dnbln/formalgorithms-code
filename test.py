@@ -93,6 +93,6 @@ if __name__=='__main__':
     asyncio.run(main())
     elapsed = time.time() - t
     fb.write(f'\nAll workers completed in {elapsed:.2f} seconds\n')
-    if gst:
-        elapsed_gst = time.time() - gst
-        fb.write(f'Total time from first worker start to last worker completion: {elapsed_gst:.2f} seconds\n')
+    elapsed_gst = time.time() - gst
+    fb.write(f'Total time from first worker start to last worker completion: {elapsed_gst:.2f} seconds\n')
+    fb.write(f'::{elapsed},{elapsed_gst},{CONCURRENCY},{INIT_TOTAL_TIME},{ITERATIONS}\n')

@@ -2,9 +2,9 @@
 
 alr build --release
 
-sleep 1
 bin/formalgorithms &
 formalgorithms_pid=$!
+sleep 1
 if kill -0 $formalgorithms_pid 2>/dev/null; then
     echo "Formalgorithms started successfully."
 else
@@ -13,7 +13,7 @@ else
 fi
 sleep 5
 netstat -anvp tcp | awk 'NR<3 || /LISTEN/' | grep 8080
-python3 test.py
+timeout 10s io-bench-tokio/target/release/io-bench-tokio-client 1>> results-sch.txt
 sleep 1
 kill -9 $formalgorithms_pid >/dev/null
 sleep 1

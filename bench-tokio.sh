@@ -3,9 +3,9 @@
 cd io-bench-tokio
 cargo build --release --bin io-bench-tokio
 cd ..
-sleep 1
 io-bench-tokio/target/release/io-bench-tokio &
 bench_pid=$!
+sleep 1
 if kill -0 $bench_pid 2>/dev/null; then
     echo "bench started successfully."
 else
@@ -14,7 +14,7 @@ else
 fi
 sleep 5
 netstat -anvp tcp | awk 'NR<3 || /LISTEN/' | grep 8080
-python3 test.py
+timeout 10s io-bench-tokio/target/release/io-bench-tokio-client 1>> results-tokio.txt
 sleep 1
 kill -9 $bench_pid >/dev/null
 sleep 1
