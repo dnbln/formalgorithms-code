@@ -5,13 +5,13 @@
     <stringAttribute key="distributedNetworkInterface" value="192.168.2.4"/>
     <intAttribute key="distributedNodesCount" value="1"/>
     <stringAttribute key="distributedTLC" value="off"/>
-    <intAttribute key="fpIndex" value="5"/>
+    <intAttribute key="fpIndex" value="0"/>
     <intAttribute key="maxHeapSize" value="25"/>
     <stringAttribute key="modelBehaviorInit" value=""/>
     <stringAttribute key="modelBehaviorNext" value=""/>
     <stringAttribute key="modelBehaviorSpec" value="Spec"/>
     <intAttribute key="modelBehaviorSpecType" value="1"/>
-    <stringAttribute key="modelBehaviorVars" value="TaskIdCurrent, TasksFinished, I_, RTStarted, I, K, LQBSizes, HasWork, GQAFirst, Futures, pc, FDReadsAvailable, LQA, LQB, LQASizes, RTStopped, LQAClock, LQLocks, GQALast, FuturePush, tid_, tid, GQLock, task, GQA, GQB, FDWritesAvailable, wr, GQBSize, ListenerSocketFd, KQueues"/>
+    <stringAttribute key="modelBehaviorVars" value="TaskIdCurrent, TasksFinished, I_, RTStarted, I, J, K, LQBSizes, HasWork, GQAFirst, Futures, pc, FDReadsAvailable, LQA, LQB, LQASizes, RTStopped, LQAClock, LQLocks, GQALast, FuturePush, tid_, tid, GQLock, task, GQA, GQB, FDWritesAvailable, wr, GQBSize, ListenerSocketFd, KQueues, kq_out"/>
     <stringAttribute key="modelComments" value=""/>
     <booleanAttribute key="modelCorrectnessCheckDeadlock" value="true"/>
     <listAttribute key="modelCorrectnessInvariants">
@@ -32,6 +32,8 @@
         <listEntry value="NullLock;;NullLock;1;0"/>
         <listEntry value="NullFuture;;NullFuture;1;0"/>
         <listEntry value="NullKQ;;NullKQ;1;0"/>
+        <listEntry value="KQPollNum;;1;0;0"/>
+        <listEntry value="NullBlockedIOInfoType;;NullBlockedIOInfoType;1;0"/>
     </listAttribute>
     <intAttribute key="modelVersion" value="20191005"/>
     <intAttribute key="numberOfWorkers" value="4"/>

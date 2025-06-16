@@ -5,15 +5,18 @@ CONSTANT GQSize
 CONSTANT LQSize
 CONSTANT NumWorkers
 CONSTANT NumConnections
+CONSTANT KQPollNum
 CONSTANT NullTask
 CONSTANT NullLock
 CONSTANT NullFuture
 CONSTANT NullKQ
+CONSTANT NullBlockedIOInfoType
 
 ASSUME GQSize >= 1
 ASSUME LQSize >= 1
 ASSUME NumWorkers >= 1
 ASSUME NumConnections > 1
+ASSUME KQPollNum >= 1
 
 GQ == 1..GQSize
 LQ == 1..LQSize
@@ -54,7 +57,15 @@ ASSUME NullFuture \notin FutureRefType
 FutureOptRefType == FutureRefType \union {NullFuture}
 FuturePushType == [Workers -> FutureOptRefType]
 
-Task == [ t_id : Task_Id, state : TaskState, future : AllFutures ]
+BlockedIOKindRead == "read"
+BlockedIOKindWrite == "write"
+BlockedIOKindType == {BlockedIOKindRead, BlockedIOKindWrite}
+
+BlockedIOInfoType == [fd : FDs, ty : BlockedIOKindType, data: Nat, eof : BOOLEAN]
+ASSUME NullBlockedIOInfoType \notin BlockedIOInfoType 
+BlockedIOInfoOptType == BlockedIOInfoType \union {NullBlockedIOInfoType}
+
+Task == [ t_id : Task_Id, state : TaskState, future : AllFutures, blocked_io_info : BlockedIOInfoOptType ]
 ASSUME NullTask \notin Task  
 OptTask == Task \union {NullTask}
 
@@ -74,9 +85,11 @@ KQWaitKindRead == "read"
 KQWaitKindWrite == "write"
 KQWaitKind == {KQWaitKindRead, KQWaitKindWrite}
 
-KEventType == [fd : FDs, kind : KQWaitKind, available : Nat]
+KEventType == [ fd : FDs, kind : KQWaitKind, data : Nat, eof : BOOLEAN, t_id : Task_Id ]
 KQType == [available : Seq(KEventType), waiting : Seq(KEventType)] \union {NullKQ}
 KQueuesType == [KQ -> KQType]
+
+MinNum(a, b) == IF a < b THEN a ELSE b
 
 (* --algorithm scheduler
 
@@ -122,15 +135,20 @@ define
     EventuallyAllTasksFinish == <>AllTasksDone
     
     Safety ==
-        /\ TRUE
+        /\ GQAFirst <= GQALast
+        /\ TasksFinished <= TaskIdCurrent
     
     Liveness ==
         /\ WorkersStopOnceRTFlags
         /\ RTStopFlaggedOnceAllTasksDone
         /\ EventuallyAllTasksFinish
+
     TypeInvariant ==
         /\ GQA \in GQType
+        /\ GQAFirst \in 0..GQSize * 2
+        /\ GQALast \in 0..GQSize * 2
         /\ GQB \in GQType
+        /\ GQBSize \in 0..GQSize
         /\ GQLock \in GQLockType
         /\ LQA \in LQGlobalType
         /\ LQAClock \in LQSizesType
@@ -138,10 +156,13 @@ define
         /\ LQB \in LQGlobalType
         /\ LQBSizes \in LQSizesType
         /\ LQLocks \in LQLocksType
+        /\ TaskIdCurrent \in Nat
+        /\ TasksFinished \in Nat
         /\ RTStarted \in BOOLEAN
         /\ RTStopped \in BOOLEAN
         /\ Futures \in FuturesListType
         /\ FuturePush \in FuturePushType
+        /\ KQueues \in KQueuesType
 end define;
 
 macro Next_TId(var) begin
@@ -157,7 +178,7 @@ begin
         Next_TId(tid);
     RTSpawnInit:
         \* No need to lock here, workers await RTStarted which we only set on the next step.
-        LQA[1][1] := [ t_id |-> tid, state |-> TSReady, future |-> TcpListenerFutureId ];
+        LQA[1][1] := [ t_id |-> tid, state |-> TSReady, future |-> TcpListenerFutureId, blocked_io_info |-> NullBlockedIOInfoType ];
         LQASizes[1] := 1;
     RTStart:
         RTStarted := TRUE;
@@ -171,7 +192,9 @@ variables
     task = NullTask;
     HasWork = FALSE;
     I = 1;
+    J = 1;
     K = 1;
+    kq_out = [i \in 1..0 |-> TRUE];
 begin
     WWait:
         await RTStarted = TRUE;
@@ -187,14 +210,60 @@ begin
             ProcessQB_LQ_Lock:
                 await LQLocks[self] = NullLock;
                 LQLocks[self] := self;
-                \* TODO: poll LQB kqueue
                 
-            \* fetch next task (opt)
+                \* Flush Blocked
+                I := 1;
+                K := 0;
+            LQ_Flush_Loop:
+                while I <= LQASizes[self] do
+                LQ_Flush_Loop_Inner:
+                    if LQA[self][I] = NullTask then
+                        goto LQ_Flush_Step;
+                    end if;
+                LQ_Flush_Continue:
+                    if LQA[self][I].state = TSReady then
+                        K := K + 1;
+                        LQA[self][K] := LQA[self][I];
+                    else
+                        if LQA[self][I].state \in {TSBTimer, TSBIO} then
+                            LQB[self][LQBSizes[self]] := LQA[self][I];
+                            \* TODO: push to kqueue
+                        end if;
+                    end if;
+                LQ_Flush_Step:
+                    I := I + 1;
+                end while;
+            LQ_Poll_KQ:
+                if KQueues[self] # NullKQ then
+                    LQ_Poll_KQ_Begin:
+                        kq_out := [i \in (DOMAIN KQueues[self].available) \intersect 1..KQPollNum |-> KQueues[self].available[i]];
+                        KQueues[self].available := [i \in (DOMAIN KQueues[self].available) \intersect KQPollNum + 1..Len(KQueues[self].available) |-> KQueues[self].available[i]];
+                    Update_Ready:
+                        LQB[self] := [i \in LQ |->
+                            IF \E x \in kq_out: LQB[self][i].t_id = x.t_id THEN
+                                LET x == CHOOSE x \in kq_out: x.t_id = LQB[i].t_id
+                                IN 
+                                    [LQB[i] EXCEPT
+                                        !.state = TSReady,
+                                        !.blocked_io_info.data = x.data,
+                                        !.blocked_io_info.eof = x.eof
+                                    ]
+                            ELSE LQB[i]];
+                        I := 1;
+                        K := 0;
+\*                    Flush_Ready:
+\*                        LQA
+                end if;
+                \* TODO: process QB, poll LQB kqueue
+            LQ_Reset_Clock:
+                LQASizes[self] := K;
+                LQAClock[self] := K + 1;
+                \* fetch next task (opt)
             LQ_Pull:
                 if LQASizes[self] = 0 then
                     HasWork := FALSE;
                 else
-                    LQAClock[self] := LQAClock[self] + 1;
+                    LQAClock[self] := LQAClock[self] - 1;
                     LQA[self][LQAClock[self]].state := TSRunning;
                     task := LQA[self][LQAClock[self]];
                     HasWork := TRUE;
@@ -229,6 +298,7 @@ begin
                             goto Main_Loop;
                         end if;
                     WorkStealing:
+                        \* TODO
                         goto Main_Loop;
                 else
                     Has_Work_Loop:
@@ -253,13 +323,13 @@ begin
                                         HasWork := FALSE;
                                 else
                                     UpdateLQAClock2:
-                                        if LQAClock[self] = LQASizes[self] then
+                                        if LQAClock[self] = 1 then
                                             HasWork := FALSE;
                                             LQLocks[self] := NullLock; \* unlock
                                             goto Has_Work_Loop; \* exit
                                         end if;
                                     IncrementLQAClocK2:
-                                        LQAClock[self] := LQAClock[self] + 1;
+                                        LQAClock[self] := LQAClock[self] - 1;
                                         LQA[self][LQAClock[self]].state := TSRunning;
                                         task := LQA[self][LQAClock[self]];
                                         HasWork := TRUE;
@@ -268,35 +338,6 @@ begin
                                 LQLocks[self] := NullLock;
                         end while;
                 end if;
-            FlushBlocked:
-                    await LQLocks[self] = NullLock;
-                    LQLocks[self] := self;
-                    I := 1;
-                    K := 0;
-                LQ_Flush_Loop:
-                    while I <= LQASizes[self] do
-                    LQ_Flush_Loop_Inner:
-                        if LQA[self][I] = NullTask then
-                            goto LQ_Flush_Step;
-                        end if;
-                    LQ_Flush_Continue:
-                        if LQA[self][I].state = TSReady then
-                            K := K + 1;
-                            LQA[self][K] := LQA[self][I];
-                        else
-                            if LQA[self][I].state \in {TSBTimer, TSBIO} then
-                                LQB[self][LQBSizes[self]] := LQA[self][I];
-                                \* TODO: push to kqueue
-                            end if;
-                        end if;
-                    LQ_Flush_Step:
-                        I := I + 1;
-                    end while;
-                    LQASizes[self] := K;
-                LQ_Reset_Clock:
-                    LQAClock[self] := 0;
-                LQ_Unlock3:
-                    LQLocks[self] := NullLock;
         end while;
     WFinish:
         skip;
@@ -325,9 +366,9 @@ begin
                     TPPLockGQ:
                         await GQLock = NullLock;
                         GQLock := wr;
-                        I := 1;
+                        I := LQSize \div 2 + 1;
                     TPPPushGQLoop:
-                        while I < LQSize \div 2 do
+                        while I < LQSize do
                         TPPPushGQStatusCheck:
                             if LQA[wr][I] # NullTask then
                             TPPPushTaskNotNull:
@@ -349,6 +390,13 @@ begin
                         end while;
                     TPPUnlockGQ:
                         GQLock := NullLock;
+                        LQASizes[wr] := LQSize \div 2;
+                    TPPCheckClock:
+                        if LQAClock[wr] > LQASizes[wr] then
+                            LQASizes[wr] := LQASizes[wr] + 1;
+                            LQA[wr] := [LQA[wr] EXCEPT ![LQASizes[wr]] = LQA[wr][LQAClock[wr]], ![LQAClock[wr]] = NullTask];
+                            LQAClock[wr] := LQASizes[wr];
+                        end if; 
                 end if;
             TPPPushLQ:
                 LQASizes[wr] := LQASizes[wr] + 1;
@@ -406,9 +454,9 @@ begin
 end process;
 
 end algorithm; *)
-\* BEGIN TRANSLATION (chksum(pcal) = "4e339b32" /\ chksum(tla) = "a7b98a38")
-\* Process variable tid of process RTSpawn at line 154 col 5 changed to tid_
-\* Process variable I of process WorkerThread at line 173 col 5 changed to I_
+\* BEGIN TRANSLATION (chksum(pcal) = "1ce8525a" /\ chksum(tla) = "302166ca")
+\* Process variable tid of process RTSpawn at line 175 col 5 changed to tid_
+\* Process variable I of process WorkerThread at line 194 col 5 changed to I_
 VARIABLES pc, GQA, GQAFirst, GQALast, GQB, GQBSize, GQLock, LQA, LQAClock, 
           LQASizes, LQB, LQBSizes, LQLocks, TaskIdCurrent, TasksFinished, 
           RTStarted, RTStopped, Futures, FuturePush, FDReadsAvailable, 
@@ -424,15 +472,20 @@ RTStopFlaggedOnceAllTasksDone == AllTasksDone => <>RTStopped
 EventuallyAllTasksFinish == <>AllTasksDone
 
 Safety ==
-    /\ TRUE
+    /\ GQAFirst <= GQALast
+    /\ TasksFinished <= TaskIdCurrent
 
 Liveness ==
     /\ WorkersStopOnceRTFlags
     /\ RTStopFlaggedOnceAllTasksDone
     /\ EventuallyAllTasksFinish
+
 TypeInvariant ==
     /\ GQA \in GQType
+    /\ GQAFirst \in 0..GQSize * 2
+    /\ GQALast \in 0..GQSize * 2
     /\ GQB \in GQType
+    /\ GQBSize \in 0..GQSize
     /\ GQLock \in GQLockType
     /\ LQA \in LQGlobalType
     /\ LQAClock \in LQSizesType
@@ -440,18 +493,21 @@ TypeInvariant ==
     /\ LQB \in LQGlobalType
     /\ LQBSizes \in LQSizesType
     /\ LQLocks \in LQLocksType
+    /\ TaskIdCurrent \in Nat
+    /\ TasksFinished \in Nat
     /\ RTStarted \in BOOLEAN
     /\ RTStopped \in BOOLEAN
     /\ Futures \in FuturesListType
     /\ FuturePush \in FuturePushType
+    /\ KQueues \in KQueuesType
 
-VARIABLES tid_, task, HasWork, I_, K, wr, tid, I, ListenerSocketFd
+VARIABLES tid_, task, HasWork, I_, J, K, kq_out, wr, tid, I, ListenerSocketFd
 
 vars == << pc, GQA, GQAFirst, GQALast, GQB, GQBSize, GQLock, LQA, LQAClock, 
            LQASizes, LQB, LQBSizes, LQLocks, TaskIdCurrent, TasksFinished, 
            RTStarted, RTStopped, Futures, FuturePush, FDReadsAvailable, 
-           FDWritesAvailable, KQueues, tid_, task, HasWork, I_, K, wr, tid, I, 
-           ListenerSocketFd >>
+           FDWritesAvailable, KQueues, tid_, task, HasWork, I_, J, K, kq_out, 
+           wr, tid, I, ListenerSocketFd >>
 
 ProcSet == {0} \cup (Workers) \cup (TaskPusherProcesses) \cup ({TcpListenerFutureId}) \cup {KernelProcessId}
 
@@ -483,7 +539,9 @@ Init == (* Global variables *)
         /\ task = [self \in Workers |-> NullTask]
         /\ HasWork = [self \in Workers |-> FALSE]
         /\ I_ = [self \in Workers |-> 1]
+        /\ J = [self \in Workers |-> 1]
         /\ K = [self \in Workers |-> 1]
+        /\ kq_out = [self \in Workers |-> [i \in 1..0 |-> TRUE]]
         (* Process TaskPusherProcess *)
         /\ wr = [self \in TaskPusherProcesses |-> self - NumWorkers]
         /\ tid = [self \in TaskPusherProcesses |-> 0]
@@ -504,19 +562,19 @@ RTGetNext == /\ pc[0] = "RTGetNext"
                              LQAClock, LQASizes, LQB, LQBSizes, LQLocks, 
                              TasksFinished, RTStarted, RTStopped, Futures, 
                              FuturePush, FDReadsAvailable, FDWritesAvailable, 
-                             KQueues, task, HasWork, I_, K, wr, tid, I, 
-                             ListenerSocketFd >>
+                             KQueues, task, HasWork, I_, J, K, kq_out, wr, tid, 
+                             I, ListenerSocketFd >>
 
 RTSpawnInit == /\ pc[0] = "RTSpawnInit"
-               /\ LQA' = [LQA EXCEPT ![1][1] = [ t_id |-> tid_, state |-> TSReady, future |-> TcpListenerFutureId ]]
+               /\ LQA' = [LQA EXCEPT ![1][1] = [ t_id |-> tid_, state |-> TSReady, future |-> TcpListenerFutureId, blocked_io_info |-> NullBlockedIOInfoType ]]
                /\ LQASizes' = [LQASizes EXCEPT ![1] = 1]
                /\ pc' = [pc EXCEPT ![0] = "RTStart"]
                /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, GQLock, 
                                LQAClock, LQB, LQBSizes, LQLocks, TaskIdCurrent, 
                                TasksFinished, RTStarted, RTStopped, Futures, 
                                FuturePush, FDReadsAvailable, FDWritesAvailable, 
-                               KQueues, tid_, task, HasWork, I_, K, wr, tid, I, 
-                               ListenerSocketFd >>
+                               KQueues, tid_, task, HasWork, I_, J, K, kq_out, 
+                               wr, tid, I, ListenerSocketFd >>
 
 RTStart == /\ pc[0] = "RTStart"
            /\ RTStarted' = TRUE
@@ -525,8 +583,8 @@ RTStart == /\ pc[0] = "RTStart"
                            LQAClock, LQASizes, LQB, LQBSizes, LQLocks, 
                            TaskIdCurrent, TasksFinished, RTStopped, Futures, 
                            FuturePush, FDReadsAvailable, FDWritesAvailable, 
-                           KQueues, tid_, task, HasWork, I_, K, wr, tid, I, 
-                           ListenerSocketFd >>
+                           KQueues, tid_, task, HasWork, I_, J, K, kq_out, wr, 
+                           tid, I, ListenerSocketFd >>
 
 RTFinish == /\ pc[0] = "RTFinish"
             /\ TaskIdCurrent = TasksFinished
@@ -536,8 +594,8 @@ RTFinish == /\ pc[0] = "RTFinish"
                             LQAClock, LQASizes, LQB, LQBSizes, LQLocks, 
                             TaskIdCurrent, TasksFinished, RTStarted, Futures, 
                             FuturePush, FDReadsAvailable, FDWritesAvailable, 
-                            KQueues, tid_, task, HasWork, I_, K, wr, tid, I, 
-                            ListenerSocketFd >>
+                            KQueues, tid_, task, HasWork, I_, J, K, kq_out, wr, 
+                            tid, I, ListenerSocketFd >>
 
 RTSpawn == RTGetNext \/ RTSpawnInit \/ RTStart \/ RTFinish
 
@@ -549,8 +607,8 @@ WWait(self) == /\ pc[self] = "WWait"
                                TaskIdCurrent, TasksFinished, RTStarted, 
                                RTStopped, Futures, FuturePush, 
                                FDReadsAvailable, FDWritesAvailable, KQueues, 
-                               tid_, task, HasWork, I_, K, wr, tid, I, 
-                               ListenerSocketFd >>
+                               tid_, task, HasWork, I_, J, K, kq_out, wr, tid, 
+                               I, ListenerSocketFd >>
 
 Main_Loop(self) == /\ pc[self] = "Main_Loop"
                    /\ pc' = [pc EXCEPT ![self] = "RTStopCheck"]
@@ -560,7 +618,7 @@ Main_Loop(self) == /\ pc[self] = "Main_Loop"
                                    TasksFinished, RTStarted, RTStopped, 
                                    Futures, FuturePush, FDReadsAvailable, 
                                    FDWritesAvailable, KQueues, tid_, task, 
-                                   HasWork, I_, K, wr, tid, I, 
+                                   HasWork, I_, J, K, kq_out, wr, tid, I, 
                                    ListenerSocketFd >>
 
 RTStopCheck(self) == /\ pc[self] = "RTStopCheck"
@@ -573,13 +631,15 @@ RTStopCheck(self) == /\ pc[self] = "RTStopCheck"
                                      TasksFinished, RTStarted, RTStopped, 
                                      Futures, FuturePush, FDReadsAvailable, 
                                      FDWritesAvailable, KQueues, tid_, task, 
-                                     HasWork, I_, K, wr, tid, I, 
+                                     HasWork, I_, J, K, kq_out, wr, tid, I, 
                                      ListenerSocketFd >>
 
 ProcessQB_LQ_Lock(self) == /\ pc[self] = "ProcessQB_LQ_Lock"
                            /\ LQLocks[self] = NullLock
                            /\ LQLocks' = [LQLocks EXCEPT ![self] = self]
-                           /\ pc' = [pc EXCEPT ![self] = "LQ_Pull"]
+                           /\ I_' = [I_ EXCEPT ![self] = 1]
+                           /\ K' = [K EXCEPT ![self] = 0]
+                           /\ pc' = [pc EXCEPT ![self] = "LQ_Flush_Loop"]
                            /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, 
                                            GQBSize, GQLock, LQA, LQAClock, 
                                            LQASizes, LQB, LQBSizes, 
@@ -587,14 +647,136 @@ ProcessQB_LQ_Lock(self) == /\ pc[self] = "ProcessQB_LQ_Lock"
                                            RTStarted, RTStopped, Futures, 
                                            FuturePush, FDReadsAvailable, 
                                            FDWritesAvailable, KQueues, tid_, 
-                                           task, HasWork, I_, K, wr, tid, I, 
+                                           task, HasWork, J, kq_out, wr, tid, 
+                                           I, ListenerSocketFd >>
+
+LQ_Flush_Loop(self) == /\ pc[self] = "LQ_Flush_Loop"
+                       /\ IF I_[self] <= LQASizes[self]
+                             THEN /\ pc' = [pc EXCEPT ![self] = "LQ_Flush_Loop_Inner"]
+                             ELSE /\ pc' = [pc EXCEPT ![self] = "LQ_Poll_KQ"]
+                       /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
+                                       GQLock, LQA, LQAClock, LQASizes, LQB, 
+                                       LQBSizes, LQLocks, TaskIdCurrent, 
+                                       TasksFinished, RTStarted, RTStopped, 
+                                       Futures, FuturePush, FDReadsAvailable, 
+                                       FDWritesAvailable, KQueues, tid_, task, 
+                                       HasWork, I_, J, K, kq_out, wr, tid, I, 
+                                       ListenerSocketFd >>
+
+LQ_Flush_Loop_Inner(self) == /\ pc[self] = "LQ_Flush_Loop_Inner"
+                             /\ IF LQA[self][I_[self]] = NullTask
+                                   THEN /\ pc' = [pc EXCEPT ![self] = "LQ_Flush_Step"]
+                                   ELSE /\ pc' = [pc EXCEPT ![self] = "LQ_Flush_Continue"]
+                             /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, 
+                                             GQBSize, GQLock, LQA, LQAClock, 
+                                             LQASizes, LQB, LQBSizes, LQLocks, 
+                                             TaskIdCurrent, TasksFinished, 
+                                             RTStarted, RTStopped, Futures, 
+                                             FuturePush, FDReadsAvailable, 
+                                             FDWritesAvailable, KQueues, tid_, 
+                                             task, HasWork, I_, J, K, kq_out, 
+                                             wr, tid, I, ListenerSocketFd >>
+
+LQ_Flush_Continue(self) == /\ pc[self] = "LQ_Flush_Continue"
+                           /\ IF LQA[self][I_[self]].state = TSReady
+                                 THEN /\ K' = [K EXCEPT ![self] = K[self] + 1]
+                                      /\ LQA' = [LQA EXCEPT ![self][K'[self]] = LQA[self][I_[self]]]
+                                      /\ LQB' = LQB
+                                 ELSE /\ IF LQA[self][I_[self]].state \in {TSBTimer, TSBIO}
+                                            THEN /\ LQB' = [LQB EXCEPT ![self][LQBSizes[self]] = LQA[self][I_[self]]]
+                                            ELSE /\ TRUE
+                                                 /\ LQB' = LQB
+                                      /\ UNCHANGED << LQA, K >>
+                           /\ pc' = [pc EXCEPT ![self] = "LQ_Flush_Step"]
+                           /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, 
+                                           GQBSize, GQLock, LQAClock, LQASizes, 
+                                           LQBSizes, LQLocks, TaskIdCurrent, 
+                                           TasksFinished, RTStarted, RTStopped, 
+                                           Futures, FuturePush, 
+                                           FDReadsAvailable, FDWritesAvailable, 
+                                           KQueues, tid_, task, HasWork, I_, J, 
+                                           kq_out, wr, tid, I, 
                                            ListenerSocketFd >>
+
+LQ_Flush_Step(self) == /\ pc[self] = "LQ_Flush_Step"
+                       /\ I_' = [I_ EXCEPT ![self] = I_[self] + 1]
+                       /\ pc' = [pc EXCEPT ![self] = "LQ_Flush_Loop"]
+                       /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
+                                       GQLock, LQA, LQAClock, LQASizes, LQB, 
+                                       LQBSizes, LQLocks, TaskIdCurrent, 
+                                       TasksFinished, RTStarted, RTStopped, 
+                                       Futures, FuturePush, FDReadsAvailable, 
+                                       FDWritesAvailable, KQueues, tid_, task, 
+                                       HasWork, J, K, kq_out, wr, tid, I, 
+                                       ListenerSocketFd >>
+
+LQ_Poll_KQ(self) == /\ pc[self] = "LQ_Poll_KQ"
+                    /\ IF KQueues[self] # NullKQ
+                          THEN /\ pc' = [pc EXCEPT ![self] = "LQ_Poll_KQ_Begin"]
+                          ELSE /\ pc' = [pc EXCEPT ![self] = "LQ_Reset_Clock"]
+                    /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
+                                    GQLock, LQA, LQAClock, LQASizes, LQB, 
+                                    LQBSizes, LQLocks, TaskIdCurrent, 
+                                    TasksFinished, RTStarted, RTStopped, 
+                                    Futures, FuturePush, FDReadsAvailable, 
+                                    FDWritesAvailable, KQueues, tid_, task, 
+                                    HasWork, I_, J, K, kq_out, wr, tid, I, 
+                                    ListenerSocketFd >>
+
+LQ_Poll_KQ_Begin(self) == /\ pc[self] = "LQ_Poll_KQ_Begin"
+                          /\ kq_out' = [kq_out EXCEPT ![self] = [i \in (DOMAIN KQueues[self].available) \intersect 1..KQPollNum |-> KQueues[self].available[i]]]
+                          /\ KQueues' = [KQueues EXCEPT ![self].available = [i \in (DOMAIN KQueues[self].available) \intersect KQPollNum + 1..Len(KQueues[self].available) |-> KQueues[self].available[i]]]
+                          /\ pc' = [pc EXCEPT ![self] = "Update_Ready"]
+                          /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
+                                          GQLock, LQA, LQAClock, LQASizes, LQB, 
+                                          LQBSizes, LQLocks, TaskIdCurrent, 
+                                          TasksFinished, RTStarted, RTStopped, 
+                                          Futures, FuturePush, 
+                                          FDReadsAvailable, FDWritesAvailable, 
+                                          tid_, task, HasWork, I_, J, K, wr, 
+                                          tid, I, ListenerSocketFd >>
+
+Update_Ready(self) == /\ pc[self] = "Update_Ready"
+                      /\ LQB' = [LQB EXCEPT ![self] =          [i \in LQ |->
+                                                      IF \E x \in kq_out[self]: LQB[self][i].t_id = x.t_id THEN
+                                                          LET x == CHOOSE x \in kq_out[self]: x.t_id = LQB[i].t_id
+                                                          IN
+                                                              [LQB[i] EXCEPT
+                                                                  !.state = TSReady,
+                                                                  !.blocked_io_info.data = x.data,
+                                                                  !.blocked_io_info.eof = x.eof
+                                                              ]
+                                                      ELSE LQB[i]]]
+                      /\ I_' = [I_ EXCEPT ![self] = 1]
+                      /\ K' = [K EXCEPT ![self] = 0]
+                      /\ pc' = [pc EXCEPT ![self] = "LQ_Reset_Clock"]
+                      /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
+                                      GQLock, LQA, LQAClock, LQASizes, 
+                                      LQBSizes, LQLocks, TaskIdCurrent, 
+                                      TasksFinished, RTStarted, RTStopped, 
+                                      Futures, FuturePush, FDReadsAvailable, 
+                                      FDWritesAvailable, KQueues, tid_, task, 
+                                      HasWork, J, kq_out, wr, tid, I, 
+                                      ListenerSocketFd >>
+
+LQ_Reset_Clock(self) == /\ pc[self] = "LQ_Reset_Clock"
+                        /\ LQASizes' = [LQASizes EXCEPT ![self] = K[self]]
+                        /\ LQAClock' = [LQAClock EXCEPT ![self] = K[self] + 1]
+                        /\ pc' = [pc EXCEPT ![self] = "LQ_Pull"]
+                        /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
+                                        GQLock, LQA, LQB, LQBSizes, LQLocks, 
+                                        TaskIdCurrent, TasksFinished, 
+                                        RTStarted, RTStopped, Futures, 
+                                        FuturePush, FDReadsAvailable, 
+                                        FDWritesAvailable, KQueues, tid_, task, 
+                                        HasWork, I_, J, K, kq_out, wr, tid, I, 
+                                        ListenerSocketFd >>
 
 LQ_Pull(self) == /\ pc[self] = "LQ_Pull"
                  /\ IF LQASizes[self] = 0
                        THEN /\ HasWork' = [HasWork EXCEPT ![self] = FALSE]
                             /\ UNCHANGED << LQA, LQAClock, task >>
-                       ELSE /\ LQAClock' = [LQAClock EXCEPT ![self] = LQAClock[self] + 1]
+                       ELSE /\ LQAClock' = [LQAClock EXCEPT ![self] = LQAClock[self] - 1]
                             /\ LQA' = [LQA EXCEPT ![self][LQAClock'[self]].state = TSRunning]
                             /\ task' = [task EXCEPT ![self] = LQA'[self][LQAClock'[self]]]
                             /\ HasWork' = [HasWork EXCEPT ![self] = TRUE]
@@ -604,7 +786,8 @@ LQ_Pull(self) == /\ pc[self] = "LQ_Pull"
                                  TaskIdCurrent, TasksFinished, RTStarted, 
                                  RTStopped, Futures, FuturePush, 
                                  FDReadsAvailable, FDWritesAvailable, KQueues, 
-                                 tid_, I_, K, wr, tid, I, ListenerSocketFd >>
+                                 tid_, I_, J, K, kq_out, wr, tid, I, 
+                                 ListenerSocketFd >>
 
 LQ_Unlock(self) == /\ pc[self] = "LQ_Unlock"
                    /\ LQLocks' = [LQLocks EXCEPT ![self] = NullLock]
@@ -614,8 +797,8 @@ LQ_Unlock(self) == /\ pc[self] = "LQ_Unlock"
                                    LQBSizes, TaskIdCurrent, TasksFinished, 
                                    RTStarted, RTStopped, Futures, FuturePush, 
                                    FDReadsAvailable, FDWritesAvailable, 
-                                   KQueues, tid_, task, HasWork, I_, K, wr, 
-                                   tid, I, ListenerSocketFd >>
+                                   KQueues, tid_, task, HasWork, I_, J, K, 
+                                   kq_out, wr, tid, I, ListenerSocketFd >>
 
 CheckHasWork(self) == /\ pc[self] = "CheckHasWork"
                       /\ IF HasWork[self] = FALSE
@@ -627,7 +810,7 @@ CheckHasWork(self) == /\ pc[self] = "CheckHasWork"
                                       TasksFinished, RTStarted, RTStopped, 
                                       Futures, FuturePush, FDReadsAvailable, 
                                       FDWritesAvailable, KQueues, tid_, task, 
-                                      HasWork, I_, K, wr, tid, I, 
+                                      HasWork, I_, J, K, kq_out, wr, tid, I, 
                                       ListenerSocketFd >>
 
 AttemptEnqueueFromGlobalLockLQ(self) == /\ pc[self] = "AttemptEnqueueFromGlobalLockLQ"
@@ -647,8 +830,9 @@ AttemptEnqueueFromGlobalLockLQ(self) == /\ pc[self] = "AttemptEnqueueFromGlobalL
                                                         FDReadsAvailable, 
                                                         FDWritesAvailable, 
                                                         KQueues, tid_, task, 
-                                                        HasWork, I_, wr, tid, 
-                                                        I, ListenerSocketFd >>
+                                                        HasWork, I_, J, kq_out, 
+                                                        wr, tid, I, 
+                                                        ListenerSocketFd >>
 
 AttemptEnqueueFromGlobalLockGQ(self) == /\ pc[self] = "AttemptEnqueueFromGlobalLockGQ"
                                         /\ GQLock = NullLock
@@ -666,7 +850,8 @@ AttemptEnqueueFromGlobalLockGQ(self) == /\ pc[self] = "AttemptEnqueueFromGlobalL
                                                         FDReadsAvailable, 
                                                         FDWritesAvailable, 
                                                         KQueues, tid_, task, 
-                                                        HasWork, K, wr, tid, I, 
+                                                        HasWork, J, K, kq_out, 
+                                                        wr, tid, I, 
                                                         ListenerSocketFd >>
 
 AttemptEnqueueFromGlobalWhile(self) == /\ pc[self] = "AttemptEnqueueFromGlobalWhile"
@@ -688,7 +873,8 @@ AttemptEnqueueFromGlobalWhile(self) == /\ pc[self] = "AttemptEnqueueFromGlobalWh
                                                        FDReadsAvailable, 
                                                        FDWritesAvailable, 
                                                        KQueues, tid_, task, 
-                                                       HasWork, wr, tid, I, 
+                                                       HasWork, J, kq_out, wr, 
+                                                       tid, I, 
                                                        ListenerSocketFd >>
 
 AttemptEnqueueFromGlobalFinish(self) == /\ pc[self] = "AttemptEnqueueFromGlobalFinish"
@@ -707,8 +893,8 @@ AttemptEnqueueFromGlobalFinish(self) == /\ pc[self] = "AttemptEnqueueFromGlobalF
                                                         FDReadsAvailable, 
                                                         FDWritesAvailable, 
                                                         KQueues, tid_, task, 
-                                                        HasWork, I_, K, wr, 
-                                                        tid, I, 
+                                                        HasWork, I_, J, K, 
+                                                        kq_out, wr, tid, I, 
                                                         ListenerSocketFd >>
 
 EnqueueFromGlobalCheck(self) == /\ pc[self] = "EnqueueFromGlobalCheck"
@@ -723,8 +909,9 @@ EnqueueFromGlobalCheck(self) == /\ pc[self] = "EnqueueFromGlobalCheck"
                                                 RTStopped, Futures, FuturePush, 
                                                 FDReadsAvailable, 
                                                 FDWritesAvailable, KQueues, 
-                                                tid_, task, HasWork, I_, K, wr, 
-                                                tid, I, ListenerSocketFd >>
+                                                tid_, task, HasWork, I_, J, K, 
+                                                kq_out, wr, tid, I, 
+                                                ListenerSocketFd >>
 
 WorkStealing(self) == /\ pc[self] = "WorkStealing"
                       /\ pc' = [pc EXCEPT ![self] = "Main_Loop"]
@@ -734,20 +921,20 @@ WorkStealing(self) == /\ pc[self] = "WorkStealing"
                                       TasksFinished, RTStarted, RTStopped, 
                                       Futures, FuturePush, FDReadsAvailable, 
                                       FDWritesAvailable, KQueues, tid_, task, 
-                                      HasWork, I_, K, wr, tid, I, 
+                                      HasWork, I_, J, K, kq_out, wr, tid, I, 
                                       ListenerSocketFd >>
 
 Has_Work_Loop(self) == /\ pc[self] = "Has_Work_Loop"
                        /\ IF HasWork[self] = TRUE
                              THEN /\ pc' = [pc EXCEPT ![self] = "DoFuturePoll"]
-                             ELSE /\ pc' = [pc EXCEPT ![self] = "FlushBlocked"]
+                             ELSE /\ pc' = [pc EXCEPT ![self] = "Main_Loop"]
                        /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
                                        GQLock, LQA, LQAClock, LQASizes, LQB, 
                                        LQBSizes, LQLocks, TaskIdCurrent, 
                                        TasksFinished, RTStarted, RTStopped, 
                                        Futures, FuturePush, FDReadsAvailable, 
                                        FDWritesAvailable, KQueues, tid_, task, 
-                                       HasWork, I_, K, wr, tid, I, 
+                                       HasWork, I_, J, K, kq_out, wr, tid, I, 
                                        ListenerSocketFd >>
 
 DoFuturePoll(self) == /\ pc[self] = "DoFuturePoll"
@@ -759,7 +946,7 @@ DoFuturePoll(self) == /\ pc[self] = "DoFuturePoll"
                                       TasksFinished, RTStarted, RTStopped, 
                                       FuturePush, FDReadsAvailable, 
                                       FDWritesAvailable, KQueues, tid_, task, 
-                                      HasWork, I_, K, wr, tid, I, 
+                                      HasWork, I_, J, K, kq_out, wr, tid, I, 
                                       ListenerSocketFd >>
 
 ProcessStatus(self) == /\ pc[self] = "ProcessStatus"
@@ -776,7 +963,7 @@ ProcessStatus(self) == /\ pc[self] = "ProcessStatus"
                                        RTStarted, RTStopped, Futures, 
                                        FuturePush, FDReadsAvailable, 
                                        FDWritesAvailable, KQueues, tid_, task, 
-                                       HasWork, I_, K, wr, tid, I, 
+                                       HasWork, I_, J, K, kq_out, wr, tid, I, 
                                        ListenerSocketFd >>
 
 LQ_Lock2(self) == /\ pc[self] = "LQ_Lock2"
@@ -788,8 +975,8 @@ LQ_Lock2(self) == /\ pc[self] = "LQ_Lock2"
                                   TaskIdCurrent, TasksFinished, RTStarted, 
                                   RTStopped, Futures, FuturePush, 
                                   FDReadsAvailable, FDWritesAvailable, KQueues, 
-                                  tid_, task, HasWork, I_, K, wr, tid, I, 
-                                  ListenerSocketFd >>
+                                  tid_, task, HasWork, I_, J, K, kq_out, wr, 
+                                  tid, I, ListenerSocketFd >>
 
 LQ_Pull2(self) == /\ pc[self] = "LQ_Pull2"
                   /\ IF LQASizes[self] = 0
@@ -800,8 +987,8 @@ LQ_Pull2(self) == /\ pc[self] = "LQ_Pull2"
                                   LQLocks, TaskIdCurrent, TasksFinished, 
                                   RTStarted, RTStopped, Futures, FuturePush, 
                                   FDReadsAvailable, FDWritesAvailable, KQueues, 
-                                  tid_, task, HasWork, I_, K, wr, tid, I, 
-                                  ListenerSocketFd >>
+                                  tid_, task, HasWork, I_, J, K, kq_out, wr, 
+                                  tid, I, ListenerSocketFd >>
 
 LQ_Pull_Empty2(self) == /\ pc[self] = "LQ_Pull_Empty2"
                         /\ HasWork' = [HasWork EXCEPT ![self] = FALSE]
@@ -812,10 +999,11 @@ LQ_Pull_Empty2(self) == /\ pc[self] = "LQ_Pull_Empty2"
                                         TasksFinished, RTStarted, RTStopped, 
                                         Futures, FuturePush, FDReadsAvailable, 
                                         FDWritesAvailable, KQueues, tid_, task, 
-                                        I_, K, wr, tid, I, ListenerSocketFd >>
+                                        I_, J, K, kq_out, wr, tid, I, 
+                                        ListenerSocketFd >>
 
 UpdateLQAClock2(self) == /\ pc[self] = "UpdateLQAClock2"
-                         /\ IF LQAClock[self] = LQASizes[self]
+                         /\ IF LQAClock[self] = 1
                                THEN /\ HasWork' = [HasWork EXCEPT ![self] = FALSE]
                                     /\ LQLocks' = [LQLocks EXCEPT ![self] = NullLock]
                                     /\ pc' = [pc EXCEPT ![self] = "Has_Work_Loop"]
@@ -827,11 +1015,11 @@ UpdateLQAClock2(self) == /\ pc[self] = "UpdateLQAClock2"
                                          TasksFinished, RTStarted, RTStopped, 
                                          Futures, FuturePush, FDReadsAvailable, 
                                          FDWritesAvailable, KQueues, tid_, 
-                                         task, I_, K, wr, tid, I, 
+                                         task, I_, J, K, kq_out, wr, tid, I, 
                                          ListenerSocketFd >>
 
 IncrementLQAClocK2(self) == /\ pc[self] = "IncrementLQAClocK2"
-                            /\ LQAClock' = [LQAClock EXCEPT ![self] = LQAClock[self] + 1]
+                            /\ LQAClock' = [LQAClock EXCEPT ![self] = LQAClock[self] - 1]
                             /\ LQA' = [LQA EXCEPT ![self][LQAClock'[self]].state = TSRunning]
                             /\ task' = [task EXCEPT ![self] = LQA'[self][LQAClock'[self]]]
                             /\ HasWork' = [HasWork EXCEPT ![self] = TRUE]
@@ -843,7 +1031,7 @@ IncrementLQAClocK2(self) == /\ pc[self] = "IncrementLQAClocK2"
                                             RTStopped, Futures, FuturePush, 
                                             FDReadsAvailable, 
                                             FDWritesAvailable, KQueues, tid_, 
-                                            I_, K, wr, tid, I, 
+                                            I_, J, K, kq_out, wr, tid, I, 
                                             ListenerSocketFd >>
 
 LQ_Unlock2(self) == /\ pc[self] = "LQ_Unlock2"
@@ -854,106 +1042,8 @@ LQ_Unlock2(self) == /\ pc[self] = "LQ_Unlock2"
                                     LQBSizes, TaskIdCurrent, TasksFinished, 
                                     RTStarted, RTStopped, Futures, FuturePush, 
                                     FDReadsAvailable, FDWritesAvailable, 
-                                    KQueues, tid_, task, HasWork, I_, K, wr, 
-                                    tid, I, ListenerSocketFd >>
-
-FlushBlocked(self) == /\ pc[self] = "FlushBlocked"
-                      /\ LQLocks[self] = NullLock
-                      /\ LQLocks' = [LQLocks EXCEPT ![self] = self]
-                      /\ I_' = [I_ EXCEPT ![self] = 1]
-                      /\ K' = [K EXCEPT ![self] = 0]
-                      /\ pc' = [pc EXCEPT ![self] = "LQ_Flush_Loop"]
-                      /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
-                                      GQLock, LQA, LQAClock, LQASizes, LQB, 
-                                      LQBSizes, TaskIdCurrent, TasksFinished, 
-                                      RTStarted, RTStopped, Futures, 
-                                      FuturePush, FDReadsAvailable, 
-                                      FDWritesAvailable, KQueues, tid_, task, 
-                                      HasWork, wr, tid, I, ListenerSocketFd >>
-
-LQ_Flush_Loop(self) == /\ pc[self] = "LQ_Flush_Loop"
-                       /\ IF I_[self] <= LQASizes[self]
-                             THEN /\ pc' = [pc EXCEPT ![self] = "LQ_Flush_Loop_Inner"]
-                                  /\ UNCHANGED LQASizes
-                             ELSE /\ LQASizes' = [LQASizes EXCEPT ![self] = K[self]]
-                                  /\ pc' = [pc EXCEPT ![self] = "LQ_Reset_Clock"]
-                       /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
-                                       GQLock, LQA, LQAClock, LQB, LQBSizes, 
-                                       LQLocks, TaskIdCurrent, TasksFinished, 
-                                       RTStarted, RTStopped, Futures, 
-                                       FuturePush, FDReadsAvailable, 
-                                       FDWritesAvailable, KQueues, tid_, task, 
-                                       HasWork, I_, K, wr, tid, I, 
-                                       ListenerSocketFd >>
-
-LQ_Flush_Loop_Inner(self) == /\ pc[self] = "LQ_Flush_Loop_Inner"
-                             /\ IF LQA[self][I_[self]] = NullTask
-                                   THEN /\ pc' = [pc EXCEPT ![self] = "LQ_Flush_Step"]
-                                   ELSE /\ pc' = [pc EXCEPT ![self] = "LQ_Flush_Continue"]
-                             /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, 
-                                             GQBSize, GQLock, LQA, LQAClock, 
-                                             LQASizes, LQB, LQBSizes, LQLocks, 
-                                             TaskIdCurrent, TasksFinished, 
-                                             RTStarted, RTStopped, Futures, 
-                                             FuturePush, FDReadsAvailable, 
-                                             FDWritesAvailable, KQueues, tid_, 
-                                             task, HasWork, I_, K, wr, tid, I, 
-                                             ListenerSocketFd >>
-
-LQ_Flush_Continue(self) == /\ pc[self] = "LQ_Flush_Continue"
-                           /\ IF LQA[self][I_[self]].state = TSReady
-                                 THEN /\ K' = [K EXCEPT ![self] = K[self] + 1]
-                                      /\ LQA' = [LQA EXCEPT ![self][K'[self]] = LQA[self][I_[self]]]
-                                      /\ LQB' = LQB
-                                 ELSE /\ IF LQA[self][I_[self]].state \in {TSBTimer, TSBIO}
-                                            THEN /\ LQB' = [LQB EXCEPT ![self][LQBSizes[self]] = LQA[self][I_[self]]]
-                                            ELSE /\ TRUE
-                                                 /\ LQB' = LQB
-                                      /\ UNCHANGED << LQA, K >>
-                           /\ pc' = [pc EXCEPT ![self] = "LQ_Flush_Step"]
-                           /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, 
-                                           GQBSize, GQLock, LQAClock, LQASizes, 
-                                           LQBSizes, LQLocks, TaskIdCurrent, 
-                                           TasksFinished, RTStarted, RTStopped, 
-                                           Futures, FuturePush, 
-                                           FDReadsAvailable, FDWritesAvailable, 
-                                           KQueues, tid_, task, HasWork, I_, 
-                                           wr, tid, I, ListenerSocketFd >>
-
-LQ_Flush_Step(self) == /\ pc[self] = "LQ_Flush_Step"
-                       /\ I_' = [I_ EXCEPT ![self] = I_[self] + 1]
-                       /\ pc' = [pc EXCEPT ![self] = "LQ_Flush_Loop"]
-                       /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
-                                       GQLock, LQA, LQAClock, LQASizes, LQB, 
-                                       LQBSizes, LQLocks, TaskIdCurrent, 
-                                       TasksFinished, RTStarted, RTStopped, 
-                                       Futures, FuturePush, FDReadsAvailable, 
-                                       FDWritesAvailable, KQueues, tid_, task, 
-                                       HasWork, K, wr, tid, I, 
-                                       ListenerSocketFd >>
-
-LQ_Reset_Clock(self) == /\ pc[self] = "LQ_Reset_Clock"
-                        /\ LQAClock' = [LQAClock EXCEPT ![self] = 0]
-                        /\ pc' = [pc EXCEPT ![self] = "LQ_Unlock3"]
-                        /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
-                                        GQLock, LQA, LQASizes, LQB, LQBSizes, 
-                                        LQLocks, TaskIdCurrent, TasksFinished, 
-                                        RTStarted, RTStopped, Futures, 
-                                        FuturePush, FDReadsAvailable, 
-                                        FDWritesAvailable, KQueues, tid_, task, 
-                                        HasWork, I_, K, wr, tid, I, 
-                                        ListenerSocketFd >>
-
-LQ_Unlock3(self) == /\ pc[self] = "LQ_Unlock3"
-                    /\ LQLocks' = [LQLocks EXCEPT ![self] = NullLock]
-                    /\ pc' = [pc EXCEPT ![self] = "Main_Loop"]
-                    /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
-                                    GQLock, LQA, LQAClock, LQASizes, LQB, 
-                                    LQBSizes, TaskIdCurrent, TasksFinished, 
-                                    RTStarted, RTStopped, Futures, FuturePush, 
-                                    FDReadsAvailable, FDWritesAvailable, 
-                                    KQueues, tid_, task, HasWork, I_, K, wr, 
-                                    tid, I, ListenerSocketFd >>
+                                    KQueues, tid_, task, HasWork, I_, J, K, 
+                                    kq_out, wr, tid, I, ListenerSocketFd >>
 
 WFinish(self) == /\ pc[self] = "WFinish"
                  /\ TRUE
@@ -963,12 +1053,17 @@ WFinish(self) == /\ pc[self] = "WFinish"
                                  LQLocks, TaskIdCurrent, TasksFinished, 
                                  RTStarted, RTStopped, Futures, FuturePush, 
                                  FDReadsAvailable, FDWritesAvailable, KQueues, 
-                                 tid_, task, HasWork, I_, K, wr, tid, I, 
-                                 ListenerSocketFd >>
+                                 tid_, task, HasWork, I_, J, K, kq_out, wr, 
+                                 tid, I, ListenerSocketFd >>
 
 WorkerThread(self) == WWait(self) \/ Main_Loop(self) \/ RTStopCheck(self)
-                         \/ ProcessQB_LQ_Lock(self) \/ LQ_Pull(self)
-                         \/ LQ_Unlock(self) \/ CheckHasWork(self)
+                         \/ ProcessQB_LQ_Lock(self) \/ LQ_Flush_Loop(self)
+                         \/ LQ_Flush_Loop_Inner(self)
+                         \/ LQ_Flush_Continue(self) \/ LQ_Flush_Step(self)
+                         \/ LQ_Poll_KQ(self) \/ LQ_Poll_KQ_Begin(self)
+                         \/ Update_Ready(self) \/ LQ_Reset_Clock(self)
+                         \/ LQ_Pull(self) \/ LQ_Unlock(self)
+                         \/ CheckHasWork(self)
                          \/ AttemptEnqueueFromGlobalLockLQ(self)
                          \/ AttemptEnqueueFromGlobalLockGQ(self)
                          \/ AttemptEnqueueFromGlobalWhile(self)
@@ -979,10 +1074,6 @@ WorkerThread(self) == WWait(self) \/ Main_Loop(self) \/ RTStopCheck(self)
                          \/ LQ_Lock2(self) \/ LQ_Pull2(self)
                          \/ LQ_Pull_Empty2(self) \/ UpdateLQAClock2(self)
                          \/ IncrementLQAClocK2(self) \/ LQ_Unlock2(self)
-                         \/ FlushBlocked(self) \/ LQ_Flush_Loop(self)
-                         \/ LQ_Flush_Loop_Inner(self)
-                         \/ LQ_Flush_Continue(self) \/ LQ_Flush_Step(self)
-                         \/ LQ_Reset_Clock(self) \/ LQ_Unlock3(self)
                          \/ WFinish(self)
 
 TPPLoop(self) == /\ pc[self] = "TPPLoop"
@@ -992,8 +1083,8 @@ TPPLoop(self) == /\ pc[self] = "TPPLoop"
                                  LQLocks, TaskIdCurrent, TasksFinished, 
                                  RTStarted, RTStopped, Futures, FuturePush, 
                                  FDReadsAvailable, FDWritesAvailable, KQueues, 
-                                 tid_, task, HasWork, I_, K, wr, tid, I, 
-                                 ListenerSocketFd >>
+                                 tid_, task, HasWork, I_, J, K, kq_out, wr, 
+                                 tid, I, ListenerSocketFd >>
 
 TPPStart(self) == /\ pc[self] = "TPPStart"
                   /\ FuturePush[wr[self]] # NullFuture \/ RTStopped
@@ -1008,7 +1099,8 @@ TPPStart(self) == /\ pc[self] = "TPPStart"
                                   LQLocks, TasksFinished, RTStarted, RTStopped, 
                                   Futures, FuturePush, FDReadsAvailable, 
                                   FDWritesAvailable, KQueues, tid_, task, 
-                                  HasWork, I_, K, wr, I, ListenerSocketFd >>
+                                  HasWork, I_, J, K, kq_out, wr, I, 
+                                  ListenerSocketFd >>
 
 TPPLockLQ(self) == /\ pc[self] = "TPPLockLQ"
                    /\ LQLocks[wr[self]] = NullLock
@@ -1019,8 +1111,8 @@ TPPLockLQ(self) == /\ pc[self] = "TPPLockLQ"
                                    LQBSizes, TaskIdCurrent, TasksFinished, 
                                    RTStarted, RTStopped, Futures, FuturePush, 
                                    FDReadsAvailable, FDWritesAvailable, 
-                                   KQueues, tid_, task, HasWork, I_, K, wr, 
-                                   tid, I, ListenerSocketFd >>
+                                   KQueues, tid_, task, HasWork, I_, J, K, 
+                                   kq_out, wr, tid, I, ListenerSocketFd >>
 
 TPPCheckLQSize(self) == /\ pc[self] = "TPPCheckLQSize"
                         /\ IF LQASizes[wr[self]] = LQSize
@@ -1032,24 +1124,24 @@ TPPCheckLQSize(self) == /\ pc[self] = "TPPCheckLQSize"
                                         TasksFinished, RTStarted, RTStopped, 
                                         Futures, FuturePush, FDReadsAvailable, 
                                         FDWritesAvailable, KQueues, tid_, task, 
-                                        HasWork, I_, K, wr, tid, I, 
+                                        HasWork, I_, J, K, kq_out, wr, tid, I, 
                                         ListenerSocketFd >>
 
 TPPLockGQ(self) == /\ pc[self] = "TPPLockGQ"
                    /\ GQLock = NullLock
                    /\ GQLock' = wr[self]
-                   /\ I' = [I EXCEPT ![self] = 1]
+                   /\ I' = [I EXCEPT ![self] = LQSize \div 2 + 1]
                    /\ pc' = [pc EXCEPT ![self] = "TPPPushGQLoop"]
                    /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, LQA, 
                                    LQAClock, LQASizes, LQB, LQBSizes, LQLocks, 
                                    TaskIdCurrent, TasksFinished, RTStarted, 
                                    RTStopped, Futures, FuturePush, 
                                    FDReadsAvailable, FDWritesAvailable, 
-                                   KQueues, tid_, task, HasWork, I_, K, wr, 
-                                   tid, ListenerSocketFd >>
+                                   KQueues, tid_, task, HasWork, I_, J, K, 
+                                   kq_out, wr, tid, ListenerSocketFd >>
 
 TPPPushGQLoop(self) == /\ pc[self] = "TPPPushGQLoop"
-                       /\ IF I[self] < LQSize \div 2
+                       /\ IF I[self] < LQSize
                              THEN /\ pc' = [pc EXCEPT ![self] = "TPPPushGQStatusCheck"]
                              ELSE /\ pc' = [pc EXCEPT ![self] = "TPPUnlockGQ"]
                        /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
@@ -1058,7 +1150,7 @@ TPPPushGQLoop(self) == /\ pc[self] = "TPPPushGQLoop"
                                        TasksFinished, RTStarted, RTStopped, 
                                        Futures, FuturePush, FDReadsAvailable, 
                                        FDWritesAvailable, KQueues, tid_, task, 
-                                       HasWork, I_, K, wr, tid, I, 
+                                       HasWork, I_, J, K, kq_out, wr, tid, I, 
                                        ListenerSocketFd >>
 
 TPPPushGQStatusCheck(self) == /\ pc[self] = "TPPPushGQStatusCheck"
@@ -1072,8 +1164,8 @@ TPPPushGQStatusCheck(self) == /\ pc[self] = "TPPPushGQStatusCheck"
                                               RTStarted, RTStopped, Futures, 
                                               FuturePush, FDReadsAvailable, 
                                               FDWritesAvailable, KQueues, tid_, 
-                                              task, HasWork, I_, K, wr, tid, I, 
-                                              ListenerSocketFd >>
+                                              task, HasWork, I_, J, K, kq_out, 
+                                              wr, tid, I, ListenerSocketFd >>
 
 TPPPushTaskNotNull(self) == /\ pc[self] = "TPPPushTaskNotNull"
                             /\ IF LQA[wr[self]][I[self]].state = TSReady
@@ -1096,8 +1188,8 @@ TPPPushTaskNotNull(self) == /\ pc[self] = "TPPPushTaskNotNull"
                                             RTStarted, RTStopped, Futures, 
                                             FuturePush, FDReadsAvailable, 
                                             FDWritesAvailable, KQueues, tid_, 
-                                            task, HasWork, I_, K, wr, tid, I, 
-                                            ListenerSocketFd >>
+                                            task, HasWork, I_, J, K, kq_out, 
+                                            wr, tid, I, ListenerSocketFd >>
 
 TPPGQPushWhileStep(self) == /\ pc[self] = "TPPGQPushWhileStep"
                             /\ I' = [I EXCEPT ![self] = I[self] + 1]
@@ -1109,19 +1201,36 @@ TPPGQPushWhileStep(self) == /\ pc[self] = "TPPGQPushWhileStep"
                                             RTStarted, RTStopped, Futures, 
                                             FuturePush, FDReadsAvailable, 
                                             FDWritesAvailable, KQueues, tid_, 
-                                            task, HasWork, I_, K, wr, tid, 
-                                            ListenerSocketFd >>
+                                            task, HasWork, I_, J, K, kq_out, 
+                                            wr, tid, ListenerSocketFd >>
 
 TPPUnlockGQ(self) == /\ pc[self] = "TPPUnlockGQ"
                      /\ GQLock' = NullLock
-                     /\ pc' = [pc EXCEPT ![self] = "TPPPushLQ"]
+                     /\ LQASizes' = [LQASizes EXCEPT ![wr[self]] = LQSize \div 2]
+                     /\ pc' = [pc EXCEPT ![self] = "TPPCheckClock"]
                      /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, LQA, 
-                                     LQAClock, LQASizes, LQB, LQBSizes, 
-                                     LQLocks, TaskIdCurrent, TasksFinished, 
-                                     RTStarted, RTStopped, Futures, FuturePush, 
+                                     LQAClock, LQB, LQBSizes, LQLocks, 
+                                     TaskIdCurrent, TasksFinished, RTStarted, 
+                                     RTStopped, Futures, FuturePush, 
                                      FDReadsAvailable, FDWritesAvailable, 
-                                     KQueues, tid_, task, HasWork, I_, K, wr, 
-                                     tid, I, ListenerSocketFd >>
+                                     KQueues, tid_, task, HasWork, I_, J, K, 
+                                     kq_out, wr, tid, I, ListenerSocketFd >>
+
+TPPCheckClock(self) == /\ pc[self] = "TPPCheckClock"
+                       /\ IF LQAClock[wr[self]] > LQASizes[wr[self]]
+                             THEN /\ LQASizes' = [LQASizes EXCEPT ![wr[self]] = LQASizes[wr[self]] + 1]
+                                  /\ LQA' = [LQA EXCEPT ![wr[self]] = [LQA[wr[self]] EXCEPT ![LQASizes'[wr[self]]] = LQA[wr[self]][LQAClock[wr[self]]], ![LQAClock[wr[self]]] = NullTask]]
+                                  /\ LQAClock' = [LQAClock EXCEPT ![wr[self]] = LQASizes'[wr[self]]]
+                             ELSE /\ TRUE
+                                  /\ UNCHANGED << LQA, LQAClock, LQASizes >>
+                       /\ pc' = [pc EXCEPT ![self] = "TPPPushLQ"]
+                       /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
+                                       GQLock, LQB, LQBSizes, LQLocks, 
+                                       TaskIdCurrent, TasksFinished, RTStarted, 
+                                       RTStopped, Futures, FuturePush, 
+                                       FDReadsAvailable, FDWritesAvailable, 
+                                       KQueues, tid_, task, HasWork, I_, J, K, 
+                                       kq_out, wr, tid, I, ListenerSocketFd >>
 
 TPPPushLQ(self) == /\ pc[self] = "TPPPushLQ"
                    /\ LQASizes' = [LQASizes EXCEPT ![wr[self]] = LQASizes[wr[self]] + 1]
@@ -1132,8 +1241,8 @@ TPPPushLQ(self) == /\ pc[self] = "TPPPushLQ"
                                    TaskIdCurrent, TasksFinished, RTStarted, 
                                    RTStopped, Futures, FuturePush, 
                                    FDReadsAvailable, FDWritesAvailable, 
-                                   KQueues, tid_, task, HasWork, I_, K, wr, 
-                                   tid, I, ListenerSocketFd >>
+                                   KQueues, tid_, task, HasWork, I_, J, K, 
+                                   kq_out, wr, tid, I, ListenerSocketFd >>
 
 TPPReleaseLockLQAndClearFuture(self) == /\ pc[self] = "TPPReleaseLockLQAndClearFuture"
                                         /\ LQLocks' = [LQLocks EXCEPT ![wr[self]] = NullLock]
@@ -1151,8 +1260,8 @@ TPPReleaseLockLQAndClearFuture(self) == /\ pc[self] = "TPPReleaseLockLQAndClearF
                                                         FDReadsAvailable, 
                                                         FDWritesAvailable, 
                                                         KQueues, tid_, task, 
-                                                        HasWork, I_, K, wr, 
-                                                        tid, I, 
+                                                        HasWork, I_, J, K, 
+                                                        kq_out, wr, tid, I, 
                                                         ListenerSocketFd >>
 
 TPPDone(self) == /\ pc[self] = "TPPDone"
@@ -1163,8 +1272,8 @@ TPPDone(self) == /\ pc[self] = "TPPDone"
                                  LQLocks, TaskIdCurrent, TasksFinished, 
                                  RTStarted, RTStopped, Futures, FuturePush, 
                                  FDReadsAvailable, FDWritesAvailable, KQueues, 
-                                 tid_, task, HasWork, I_, K, wr, tid, I, 
-                                 ListenerSocketFd >>
+                                 tid_, task, HasWork, I_, J, K, kq_out, wr, 
+                                 tid, I, ListenerSocketFd >>
 
 TaskPusherProcess(self) == TPPLoop(self) \/ TPPStart(self)
                               \/ TPPLockLQ(self) \/ TPPCheckLQSize(self)
@@ -1172,7 +1281,8 @@ TaskPusherProcess(self) == TPPLoop(self) \/ TPPStart(self)
                               \/ TPPPushGQStatusCheck(self)
                               \/ TPPPushTaskNotNull(self)
                               \/ TPPGQPushWhileStep(self)
-                              \/ TPPUnlockGQ(self) \/ TPPPushLQ(self)
+                              \/ TPPUnlockGQ(self) \/ TPPCheckClock(self)
+                              \/ TPPPushLQ(self)
                               \/ TPPReleaseLockLQAndClearFuture(self)
                               \/ TPPDone(self)
 
@@ -1188,8 +1298,8 @@ ListenerFutureStarted(self) == /\ pc[self] = "ListenerFutureStarted"
                                                RTStopped, Futures, FuturePush, 
                                                FDReadsAvailable, 
                                                FDWritesAvailable, KQueues, 
-                                               tid_, task, HasWork, I_, K, wr, 
-                                               tid, I >>
+                                               tid_, task, HasWork, I_, J, K, 
+                                               kq_out, wr, tid, I >>
 
 ListenerFutureSocketCreatedReturn(self) == /\ pc[self] = "ListenerFutureSocketCreatedReturn"
                                            /\ Futures' = [Futures EXCEPT ![self] = FSCompleted]
@@ -1208,8 +1318,8 @@ ListenerFutureSocketCreatedReturn(self) == /\ pc[self] = "ListenerFutureSocketCr
                                                            FDReadsAvailable, 
                                                            FDWritesAvailable, 
                                                            KQueues, tid_, task, 
-                                                           HasWork, I_, K, wr, 
-                                                           tid, I, 
+                                                           HasWork, I_, J, K, 
+                                                           kq_out, wr, tid, I, 
                                                            ListenerSocketFd >>
 
 TCPListenerFuture(self) == ListenerFutureStarted(self)
@@ -1223,7 +1333,7 @@ KEntry == /\ pc[KernelProcessId] = "KEntry"
                           TaskIdCurrent, TasksFinished, RTStarted, RTStopped, 
                           Futures, FuturePush, FDReadsAvailable, 
                           FDWritesAvailable, KQueues, tid_, task, HasWork, I_, 
-                          K, wr, tid, I, ListenerSocketFd >>
+                          J, K, kq_out, wr, tid, I, ListenerSocketFd >>
 
 Kernel == KEntry
 
@@ -1250,5 +1360,5 @@ Termination == <>(\A self \in ProcSet: pc[self] = "Done")
 
 =============================================================================
 \* Modification History
-\* Last modified Sat Jun 14 22:31:10 CEST 2025 by dinu
+\* Last modified Tue Jun 17 00:46:53 CEST 2025 by dinu
 \* Created Sat May 24 12:56:52 CEST 2025 by dinu
