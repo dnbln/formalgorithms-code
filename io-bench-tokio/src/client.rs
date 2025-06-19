@@ -7,7 +7,6 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 const TOTAL_CONNECTIONS: usize = 10000;
 const ITERATIONS: usize = 2;
 const BUF_SIZE: usize = 1024;
-const SAMPLES: usize = 100;
 const CONNECTIONS_PER_SECOND: usize = 2000;
 
 static BARRIER: std::sync::LazyLock<tokio::sync::Barrier> =
@@ -62,7 +61,6 @@ async fn worker(id: usize) {
 
 #[tokio::main]
 async fn main() {
-    // for _sample in 0..SAMPLES {
     let start = std::time::Instant::now();
     let jh = (0..TOTAL_CONNECTIONS)
         .map(|it| tokio::spawn(worker(it)))
@@ -88,7 +86,4 @@ async fn main() {
     println!("{TOTAL_CONNECTIONS},{ITERATIONS},{BUF_SIZE},{dur_sec},{time_since_start}");
 
     TIME_STARTED.store(0, std::sync::atomic::Ordering::Release);
-
-    // tokio::time::sleep(std::time::Duration::from_secs(10)).await;
-    // }
 }

@@ -2,30 +2,35 @@
 EXTENDS scheduler, TLC
 
 \* CONSTANT definitions @modelParameterConstants:1NumWorkers
-const_175011401599255000 == 
+const_17503373830201034000 == 
 2
 ----
 
 \* CONSTANT definitions @modelParameterConstants:2GQSize
-const_175011401599256000 == 
+const_17503373830201035000 == 
 128
 ----
 
 \* CONSTANT definitions @modelParameterConstants:3LQSize
-const_175011401599257000 == 
+const_17503373830201036000 == 
 4
 ----
 
-\* CONSTANT definitions @modelParameterConstants:4NumConnections
-const_175011401599258000 == 
-4
+\* CONSTANT definitions @modelParameterConstants:7KQPollNum
+const_17503373830201037000 == 
+1
 ----
 
-\* CONSTANT definitions @modelParameterConstants:8KQPollNum
-const_175011401599259000 == 
+\* CONSTANT definitions @modelParameterConstants:9NumFutures
+const_17503373830201038000 == 
+5
+----
+
+\* CONSTANT definitions @modelParameterConstants:12NumFutureSteps
+const_17503373830201039000 == 
 1
 ----
 
 =============================================================================
 \* Modification History
-\* Created Tue Jun 17 00:46:55 CEST 2025 by dinu
+\* Created Thu Jun 19 14:49:43 CEST 2025 by dinu

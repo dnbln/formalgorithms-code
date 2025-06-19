@@ -819,6 +819,7 @@ package body Scheduler is
          pragma Assert (Size = 0);
          Victim.Steal (Q, Count);
          Size := Count;
+         Stealable_Tasks := Size + 1;
       end Steal_From;
 
       procedure Push_Queue (TI : Local_Worker_Task_Info_Array; Count : Natural)
@@ -832,6 +833,7 @@ package body Scheduler is
          loop
             Q (I) := TI (I);
          end loop;
+         Stealable_Tasks := Size + 1;
       end Push_Queue;
 
       procedure Print_States is
