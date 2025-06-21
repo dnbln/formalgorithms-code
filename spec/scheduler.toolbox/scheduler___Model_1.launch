@@ -13,7 +13,7 @@
     <stringAttribute key="distributedTLC" value="off"/>
     <stringAttribute key="distributedTLCVMArgs" value=""/>
     <intAttribute key="fpBits" value="1"/>
-    <intAttribute key="fpIndex" value="39"/>
+    <intAttribute key="fpIndex" value="57"/>
     <booleanAttribute key="fpIndexRandom" value="true"/>
     <intAttribute key="maxHeapSize" value="25"/>
     <intAttribute key="maxSetSize" value="1000000"/>
@@ -22,12 +22,24 @@
     <stringAttribute key="modelBehaviorNext" value=""/>
     <stringAttribute key="modelBehaviorSpec" value="Spec"/>
     <intAttribute key="modelBehaviorSpecType" value="1"/>
-    <stringAttribute key="modelBehaviorVars" value="GQAFirst, I_, KQueues, I, J, K, L, lqbuf, fildes_, LQAClock, FuturePush, GQBSize, FDReadsAvailable, tid_, RTStarted, GQA, GQB, FDWritesAvailable, Futures, KContinueLock, Steps, HasWork, Steps_, kq_out, RTStopped, LQA, LQB, Worker_Wakeup, TasksFinished, LQASizes, current_time, pc, FuturesBlocked, FutureWorkers, tid, LQBSizes, LQLocks, PolledRead, fildes, GQLock, task, TaskIdCurrent, wr, GQALast"/>
+    <stringAttribute key="modelBehaviorVars" value="GQAFirst, I_, KQueues, I, J, K, L, lqbuf, RoundRobinToken, fildes_, LQAClock, FuturePush, GQBSize, FDReadsAvailable, tid_, RTStarted, GQA, GQB, FDWritesAvailable, Futures, Steps, HasWork, Steps_, kq_out, RTStopped, LQA, LQB, TasksFinished, LQASizes, current_time, pc, FuturesBlocked, FutureWorkers, tid, LQBSizes, LQLocks, PolledRead, fildes, GQLock, task, TaskIdCurrent, wr, GQALast, TaskReadyAges"/>
     <stringAttribute key="modelComments" value=""/>
     <booleanAttribute key="modelCorrectnessCheckDeadlock" value="true"/>
     <listAttribute key="modelCorrectnessInvariants">
         <listEntry value="1TypeInvariant"/>
-        <listEntry value="1Safety"/>
+        <listEntry value="0Safety"/>
+        <listEntry value="1GQAFirstSmallerThanLast"/>
+        <listEntry value="1GQASizesDoNotOverflow"/>
+        <listEntry value="1TasksFinished &lt;= TaskIdCurrent"/>
+        <listEntry value="1PollingFuturesHaveAssociatedWorkers"/>
+        <listEntry value="1NoNullTasksInFrontOfLQAClock"/>
+        <listEntry value="1NoDuplicateTasks"/>
+        <listEntry value="1BlockedInKQueue"/>
+        <listEntry value="1TaskReadyAgesHasProperLength"/>
+        <listEntry value="1ReadyTasksAlwaysHaveNaturalAges"/>
+        <listEntry value="1BlockedTasksHaveAgeMinusOne"/>
+        <listEntry value="1RRTokenInWorkers"/>
+        <listEntry value="1TaskReadyAgesIsBounded"/>
     </listAttribute>
     <listAttribute key="modelCorrectnessProperties">
         <listEntry value="0Liveness"/>
@@ -37,7 +49,7 @@
     <listAttribute key="modelParameterConstants">
         <listEntry value="NullTask;;NullTask;1;0"/>
         <listEntry value="NumWorkers;;2;0;0"/>
-        <listEntry value="GQSize;;128;0;0"/>
+        <listEntry value="GQSize;;10;0;0"/>
         <listEntry value="LQSize;;4;0;0"/>
         <listEntry value="NullLock;;NullLock;1;0"/>
         <listEntry value="NullFuture;;NullFuture;1;0"/>
@@ -47,10 +59,12 @@
         <listEntry value="NumFutures;;5;0;0"/>
         <listEntry value="NullFB;;NullFB;1;0"/>
         <listEntry value="NullFD;;NullFD;1;0"/>
-        <listEntry value="NumFutureSteps;;1;0;0"/>
+        <listEntry value="NumFutureSteps;;2;0;0"/>
+        <listEntry value="NullTRA;;NullTRA;1;0"/>
+        <listEntry value="NumClockCyclesBeforeGQPushPull;;1;0;0"/>
     </listAttribute>
     <intAttribute key="modelVersion" value="20191005"/>
-    <intAttribute key="numberOfWorkers" value="4"/>
+    <intAttribute key="numberOfWorkers" value="8"/>
     <stringAttribute key="postCondition" value=""/>
     <booleanAttribute key="recover" value="false"/>
     <stringAttribute key="result.mail.address" value=""/>

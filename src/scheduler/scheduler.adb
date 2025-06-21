@@ -11,6 +11,12 @@ with sys_utypes_uint16_t_h;
 
 package body Scheduler is
    IDLE_DELAY : constant := 0.05;  --  Idle delay in seconds, 50ms
+   GQ_POLL_DELAY : constant := 0.005; -- 5ms
+   Clock_Cycles_To_Push_Pull : constant Natural := 10; -- Number of clock cycles to wait to push and pull from the global queue.
+   BOUNDED_FAIRNESS : constant Boolean := True;
+   -- Bounded fairness guarantees that all tasks will eventually run,
+   -- and no task will be starved for longer than
+   -- (Clock_Cycles_To_Push_Pull + 1) * Workers * N, where N is the number of tasks currently in the system
 
    function Time_Image (T : Ada.Calendar.Time) return String is
       Year, Month, Day     : Integer;
@@ -175,9 +181,9 @@ package body Scheduler is
             Remove_Read_From_IO_Blocked_Queue (KQ => KQ, FD => B_Info.FD);
 
          when Write =>
-            Ada.Text_IO.Put_Line
-              ("Removing write block from IO blocked queue for FD: "
-               & Interfaces.C.int'Image (B_Info.FD));
+            --  Ada.Text_IO.Put_Line
+            --    ("Removing write block from IO blocked queue for FD: "
+            --     & Interfaces.C.int'Image (B_Info.FD));
             Remove_Write_From_IO_Blocked_Queue (KQ => KQ, FD => B_Info.FD);
       end case;
    end Remove_Block_From_IO_Blocked_Queue;
@@ -185,6 +191,14 @@ package body Scheduler is
    protected body Global_Task_Queue is
       function Has_Work_Left return Boolean
       is (First < Last or else Size_QB > 0);
+
+      function Need_To_Poll_IO return Boolean is
+      begin
+         if IO_Q = null then
+            return False;
+         end if;
+         return Ada.Calendar.Clock - Last_Poll_Time >= GQ_POLL_DELAY;
+      end Need_To_Poll_IO;
 
       procedure Push_One (TI : Task_Info_Access) is
       begin
@@ -266,6 +280,7 @@ package body Scheduler is
             return;
          end if;
          Poll_R := Poll_IO_Blocked_Queue (KQ => IO_Q);
+         Last_Poll_Time := Ada.Calendar.Clock;
       end Poll_IO;
 
       procedure Try_Pull
@@ -273,7 +288,9 @@ package body Scheduler is
       is
          Poll_R : Poll_Results;
       begin
-         Poll_IO (Poll_R => Poll_R);
+         if Need_To_Poll_IO then
+            Poll_IO (Poll_R => Poll_R);
+         end if;
          --  Ada.Text_IO.Put_Line
          --    ("Global Task Queue: Trying to pull tasks, current First index: "
          --     & Natural'Image (First)
@@ -338,6 +355,66 @@ package body Scheduler is
       --     & ", Last index: "
       --     & Natural'Image (Last));
       end;
+
+      procedure Push_Pull
+        (TI : in out Local_Worker_Task_Info_Array; Size : Natural)
+      is
+         Poll_R    : Poll_Results;
+         Begin_Ptr : Natural;
+         K         : Natural := 1;
+         t         : Task_Info_Access;
+      begin
+         if Need_To_Poll_IO then
+            Poll_IO (Poll_R => Poll_R);
+         end if;
+         Process_QB (Poll_R => Poll_R);
+
+         if Ptr <= First then
+            Ptr := First + 1;
+         else
+            Ptr := Ptr + 1;
+         end if;
+
+         Begin_Ptr := Ptr;
+
+         if Ptr <= Last and then K <= Size then
+            t := TI (Local_Worker_Queue_Idx (K));
+            TI (Local_Worker_Queue_Idx (K)) :=
+              Global_TI_Array
+                (Global_Task_Info_Idx
+                   ((Ptr - 1) mod Global_Task_Info_Size_Total + 1));
+            Global_TI_Array
+              (Global_Task_Info_Idx
+                 ((Ptr - 1) mod Global_Task_Info_Size_Total + 1)) :=
+              t;
+
+            K := K + 1;
+            if Ptr < Last then
+               Ptr := Ptr + 1;
+            else
+               Ptr := First + 1;
+            end if;
+         end if;
+
+         while Ptr /= Begin_Ptr and then K <= Size loop
+            t := TI (Local_Worker_Queue_Idx (K));
+            TI (Local_Worker_Queue_Idx (K)) :=
+              Global_TI_Array
+                (Global_Task_Info_Idx
+                   ((Ptr - 1) mod Global_Task_Info_Size_Total + 1));
+            Global_TI_Array
+              (Global_Task_Info_Idx
+                 ((Ptr - 1) mod Global_Task_Info_Size_Total + 1)) :=
+              t;
+
+            K := K + 1;
+            if Ptr < Last then
+               Ptr := Ptr + 1;
+            else
+               Ptr := First + 1;
+            end if;
+         end loop;
+      end Push_Pull;
 
       procedure Push_QB (TI : Local_Worker_Task_Info_Array) is
       begin
@@ -540,6 +617,7 @@ package body Scheduler is
                  Q (Local_Worker_Queue_Idx (Clock_Position));
                Q (Local_Worker_Queue_Idx (Clock_Position)) := null;
                Clock_Position := Size;
+               Stealable_Tasks := Size + 1;
             end if;
          end if;
 
@@ -622,6 +700,13 @@ package body Scheduler is
       begin
          Flush_Blocked;
          Process_QB;
+         if BOUNDED_FAIRNESS and then Size > 0 then
+            Clock_Cycles := Clock_Cycles + 1;
+            if Clock_Cycles >= Clock_Cycles_To_Push_Pull then
+               Clock_Cycles := 0;
+               Global_Task_Queue.Push_Pull (TI => Q, Size => Size);
+            end if;
+         end if;
          Reset_Clock;
          Next_Task_Opt (TI => TI, Set => Set);
       end Process_QB_And_Fetch_First;
@@ -855,8 +940,7 @@ package body Scheduler is
                        ("Blocked IO: FD = "
                         & Integer'Image (Integer (Q (I).Blocked_IO.FD))
                         & ", Type = "
-                        & Blocked_IO_Type'Image
-                            (Q (I).Blocked_IO.Blocked_Type)
+                        & Blocked_IO_Type'Image (Q (I).Blocked_IO.Blocked_Type)
                         & ", Data = "
                         & Natural'Image (Q (I).Blocked_IO.Data)
                         & ", EOF = "

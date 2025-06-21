@@ -14,6 +14,8 @@ CONSTANT NullKQ
 CONSTANT NullBlockedIOInfoType
 CONSTANT NullFB
 CONSTANT NullFD
+CONSTANT NullTRA
+CONSTANT NumClockCyclesBeforeGQPushPull
 
 ASSUME GQSize >= 8
 ASSUME LQSize >= 4
@@ -21,12 +23,16 @@ ASSUME NumWorkers >= 1
 ASSUME NumFutures >= 1
 ASSUME NumFutures <= 10000
 ASSUME KQPollNum >= 1
+ASSUME NumClockCyclesBeforeGQPushPull >= 1
 
 GQ == 1..GQSize
 LQ == 1..LQSize
 Workers == 1..NumWorkers
 OptWorker == 0..NumWorkers
 KQ == 0..NumWorkers
+
+ClkCycleSingleType == 0..NumClockCyclesBeforeGQPushPull
+ClkCyclesType == [Workers -> ClkCycleSingleType]
 
 ASSUME NullLock \notin Workers
 
@@ -114,6 +120,9 @@ ASSUME NullFB \notin FBType
 OptFBType == FBType \union {NullFB}
 FBListType == [AllFutures -> OptFBType]
 FutureWorkesListType == [AllFutures -> OptWorker]
+ASSUME NullTRA \notin Nat
+NatOrNullTRA == Nat \union {NullTRA}
+TaskReadyAgesType == Seq(NatOrNullTRA)
 
 SeqToSet(s) == { s[i] : i ∈ DOMAIN s }
 
@@ -126,12 +135,14 @@ variables
     GQALast = 0; \* Global active queue last
     GQB = [p \in GQ |-> NullTask]; \* Global blocked queue
     GQBSize = 0; \* Global blocked queue size
+    GQPPPointer = 0; \* Global queue push / pull pointer
     
     GQLock = NullLock; \* Lock for the global queue
     
     \** Local queues
     LQA = [w \in Workers |-> [p \in LQ |-> NullTask]]; \* Local active queues
     LQAClock = [w \in Workers |-> 0]; \* Local active queue clock indexes
+    ClkCycles = [w \in Workers |-> 0]; \* Count of clock cycles since last gq push / pull
     LQASizes = [w \in Workers |-> 0]; \* Local active queue sizes
     LQB = [w \in Workers |-> [p \in LQ |-> NullTask]]; \* Local blocked queues
     LQBSizes = [w \in Workers |-> 0]; \* Local blocked queue sizes
@@ -154,9 +165,9 @@ variables
     FDWritesAvailable = [fd \in FDs |-> 0]; \* TCP listener: 0, sockets: number of bytes available in kernel buffers, writing more than this will force the kernel to flush
     KQueues = [kq \in KQ |-> NullKQ]; \* KQueues
     
-    KContinueLock = FALSE; 
-    Worker_Wakeup = FALSE;
-
+    TaskReadyAges = ESeq;
+    RoundRobinToken = 1;
+    
 define
     AllTasksDone == RTStarted = TRUE /\ TaskIdCurrent = TasksFinished
     AllWorkersFinished == 
@@ -172,15 +183,45 @@ define
     NoDuplicateTasks ==
         /\ \A w1, w2 \in Workers: (LQLocks[w1] = NullLock /\ LQLocks[w2] = NullLock) => \A p1, p2 \in LQ: (w1 # w2) \/ (w1 = w2 /\ p1 # p2) => (LQA[w1][p1] # NullTask /\ LQA[w2][p2] # NullTask => LQA[w1][p1].t_id # LQA[w2][p2].t_id)
     GlobalQueueActiveReady == \A p \in GQAFirst + 1 .. GQALast: GQA[p] # NullTask /\ GQA[p].state = TSReady
+    QBFDIs(T, kind, fd) == T # NullTask /\ T.state = TSBIO /\ T.blocked_io_info.fd = fd /\ T.blocked_io_info.ty = kind
+    KQHasFd(Q, kind, fd) == Len(SelectSeq(Q.waiting \o Q.available, LAMBDA x: x.fd = fd /\ x.kind = kind)) = 1 
+    BlockedInKQueue ==
+        /\ \A w \in Workers: LQLocks[w] = NullLock /\ KQueues[w] # NullKQ => (\A fd \in FDs: \A kind \in BlockedIOKindType: (\E p \in LQ: QBFDIs(LQB[w][p], kind, fd)) <=> KQHasFd(KQueues[w], kind, fd))
+        /\ (GQLock = NullLock /\ KQueues[0] # NullKQ => (\A fd \in FDs: \A kind \in BlockedIOKindType: (\E p \in GQ: QBFDIs(GQB[p], kind, fd)) <=> KQHasFd(KQueues[0], kind, fd)))
+    TaskReadyAgesHasProperLength == Len(TaskReadyAges) = TaskIdCurrent
+    ReadyTasksAlwaysHaveNaturalAges ==
+        /\ \A w \in Workers: \A i \in LQ: LQA[w][i] # NullTask /\ LQA[w][i].state = TSReady => TaskReadyAges[LQA[w][i].t_id] >= 0
+        /\ \A i \in GQAFirst + 1 .. GQALast: TaskReadyAges[GQA[i].t_id] >= 0
+    BlockedTasksHaveAgeMinusOne ==
+        /\ \A w \in Workers: \A i \in LQ: LQA[w][i] # NullTask /\ LQA[w][i].state \in {TSBIO, TSBTimer} => TaskReadyAges[LQA[w][i].t_id] = NullTRA
+        /\ \A w \in Workers: \A i \in LQ: LQB[w][i] # NullTask /\ LQB[w][i].state \in {TSBIO, TSBTimer} => TaskReadyAges[LQB[w][i].t_id] = NullTRA
+        /\ \A i \in GQ: GQB[i] # NullTask => TaskReadyAges[GQB[i].t_id] < 0
+        
+    GQAFirstSmallerThanLast == GQAFirst <= GQALast
+    GQASizesDoNotOverflow == (GQAFirst < GQALast => GQALast <= GQAFirst + GQSize)
+    
+    GQPPPointerProper == GQPPPointer \in GQAFirst..GQALast
+    
+    PollingFuturesHaveAssociatedWorkers == \A f \in AllFutures: (Futures[f] = FSPolling => FutureWorkers[f] \in Workers)
+    RRTokenInWorkers == RoundRobinToken \in Workers
+    
+    TaskReadyAgesIsBounded == \A t \in 1..TaskIdCurrent: TaskReadyAges[t] # NullTRA => TaskReadyAges[t] <= (NumClockCyclesBeforeGQPushPull + 1) * NumWorkers * (TaskIdCurrent - TasksFinished)
     
     Safety ==
-        /\ GQAFirst <= GQALast
-        /\ (GQAFirst < GQALast => GQALast <= GQAFirst + GQSize)
+        /\ GQAFirstSmallerThanLast
+        /\ GQASizesDoNotOverflow
+        /\ GQPPPointerProper
         /\ GlobalQueueActiveReady
         /\ TasksFinished <= TaskIdCurrent
-        /\ \A f \in AllFutures: (Futures[f] = FSPolling => FutureWorkers[f] \in Workers)
+        /\ PollingFuturesHaveAssociatedWorkers
         /\ NoNullTasksInFrontOfLQAClock
         /\ NoDuplicateTasks
+        /\ BlockedInKQueue
+        /\ TaskReadyAgesHasProperLength
+        /\ ReadyTasksAlwaysHaveNaturalAges
+        /\ BlockedTasksHaveAgeMinusOne
+        /\ RRTokenInWorkers
+        /\ TaskReadyAgesIsBounded
     
     Liveness ==
         /\ WorkersStopOnceRTFlags
@@ -197,6 +238,7 @@ define
         /\ GQLock \in GQLockType
         /\ LQA \in LQGlobalType
         /\ LQAClock \in LQClocksType
+        /\ ClkCycles \in ClkCyclesType
         /\ LQASizes \in LQSizesType
         /\ LQB \in LQGlobalType
         /\ LQBSizes \in LQSizesType
@@ -210,12 +252,12 @@ define
         /\ FuturesBlocked \in FBListType
         /\ FutureWorkers \in FutureWorkesListType
         /\ KQueues \in KQueuesType
-        /\ KContinueLock \in BOOLEAN
-        /\ Worker_Wakeup \in BOOLEAN
+        /\ TaskReadyAges \in TaskReadyAgesType
 end define;
 
 macro Next_TId(var) begin
     TaskIdCurrent := TaskIdCurrent + 1;
+    TaskReadyAges := Append(TaskReadyAges, 0);
     var := TaskIdCurrent;
 end macro;
 \*
@@ -285,8 +327,6 @@ begin
     RTFinish:
         await TaskIdCurrent = TasksFinished;
         RTStopped := TRUE;
-        KContinueLock := TRUE;
-        Worker_Wakeup := TRUE;
 end process;
 
 fair+ process WorkerThread \in Workers
@@ -311,6 +351,28 @@ begin
                 if RTStopped = TRUE \/ TasksFinished = TaskIdCurrent then
                     goto WFinish;
                 end if;
+            Kernel:
+                either
+                    FDReadsAvailable := [x \in DOMAIN FDReadsAvailable |-> FDReadsAvailable[x] + 64];
+                    FDWritesAvailable := [x \in DOMAIN FDWritesAvailable |-> FDWritesAvailable[x] + 16];
+                or
+                    FDReadsAvailable := [x \in DOMAIN FDReadsAvailable |-> IF x % 2 = 0 THEN FDReadsAvailable[x] + 64 ELSE FDReadsAvailable[x]];
+                    FDWritesAvailable := [x \in DOMAIN FDWritesAvailable |-> IF x % 2 = 1 THEN FDWritesAvailable[x] + 16 ELSE FDWritesAvailable[x]];
+                or
+                    FDReadsAvailable := [x \in DOMAIN FDReadsAvailable |-> IF x % 2 = 1 THEN FDReadsAvailable[x] + 64 ELSE FDReadsAvailable[x]];
+                    FDWritesAvailable := [x \in DOMAIN FDWritesAvailable |-> IF x % 2 = 0 THEN FDWritesAvailable[x] + 16 ELSE FDWritesAvailable[x]];
+                end either;
+                KQueues := [kq \in DOMAIN KQueues |->
+                    IF KQueues[kq] = NullKQ
+                    THEN NullKQ
+                    ELSE LET
+                        IndUpd == [p \in DOMAIN KQueues[kq].waiting |-> [index |-> p, data |->
+                            (CASE KQueues[kq].waiting[p].kind = KQWaitKindRead -> FDReadsAvailable[KQueues[kq].waiting[p].fd]
+                              [] KQueues[kq].waiting[p].kind = KQWaitKindWrite -> FDWritesAvailable[KQueues[kq].waiting[p].fd]) ]]
+                    IN [waiting |-> [p \in DOMAIN KQueues[kq].waiting \ {IndUpd[p].index : p \in DOMAIN IndUpd} |-> KQueues[kq].waiting[p]],
+                        available |->
+                            KQueues[kq].available \o [p \in DOMAIN IndUpd |-> [KQueues[kq].waiting[IndUpd[p].index] EXCEPT !.data = IndUpd[p].data, !.eof = FALSE]]]
+                ];
             \* process qb
             ProcessQB_LQ_Lock:
                 await LQLocks[self] = NullLock;
@@ -380,8 +442,107 @@ begin
                 LQ_Flush_Step:
                     I := I + 1;
                 end while;
-            LQ_Poll_KQ:
                 LQASizes[self] := K;
+            LQ_GQ_CheckPushPull:
+                ClkCycles[self] := ClkCycles[self] + 1;
+                if ClkCycles[self] = NumClockCyclesBeforeGQPushPull then
+                Begin_LQ_GQ_PushPull:
+                    ClkCycles[self] := 0;
+                    AttemptEnqueueFromGlobalLockGQ2:
+                        await GQLock = NullLock;
+                        GQLock := self;
+                    GQ_Poll_Check_KQ2:
+                        if KQueues[0] = NullKQ then
+                            goto GQ_Flush_Ready_Begin2;
+                        end if;
+                    GQ_Poll_KQ_Begin2:
+                        kq_out := SubSeq(KQueues[0].available, 1, MinNum(KQPollNum, Len(KQueues[0].available)));
+                        KQueues[0].available := IF KQPollNum < Len(KQueues[0].available)
+                                                THEN SubSeq(KQueues[0].available, KQPollNum + 1, Len(KQueues[0].available))
+                                                ELSE ESeq;
+                    GQ_Update_Ready2:
+                        GQB := [i \in GQ |->
+                            IF i \in 1..GQBSize /\ \E x \in DOMAIN kq_out: GQB[self][i].t_id = kq_out[x].t_id THEN
+                                LET x == CHOOSE x \in DOMAIN kq_out: kq_out[x].t_id = LQB[i].t_id
+                                IN 
+                                    [LQB[i] EXCEPT
+                                        !.state = TSReady,
+                                        !.blocked_io_info.data = kq_out[x].data,
+                                        !.blocked_io_info.eof = kq_out[x].eof
+                                    ]
+                            ELSE GQB[i]];
+                    GQ_Flush_Ready_Begin2:
+                        I := 1;
+                        K := 0;
+                    GQ_Flush_Ready2:
+                        while I <= GQBSize do
+                            GQ_Flush_Check_Timer2:
+                                if GQB[I].state = TSBTimer then
+                                    either
+                                        GQB[I].state := TSReady; \* Timer finished
+                                    or
+                                        skip; \* Timer didn't finish
+                                    end either;
+                                end if;
+                            GQ_Flush_Ready_Check_Ready2:
+                                if GQB[I].state = TSReady then
+                                    \* Push to GQA
+                                    GQALast := GQALast + 1;
+                                    GQA[((GQALast - 1) % GQSize) + 1] := GQB[I];
+                                    TaskReadyAges[GQB[I].t_id] := 0;
+                                else
+                                    K := K + 1;
+                                    GQB[K] := GQB[I];
+                                end if;
+                            GQ_Flush_Ready_Step2:
+                                I := I + 1;
+                        end while;
+                    GQ_Flush_Ready_Done2:
+                        GQBSize := K;
+                        I := GQAFirst + 1;
+                        K := 0;
+                    AttemptEnqueueFromGlobalWhile2:
+                        while I <= GQALast /\ K < (LQSize \div 2) do
+                            K := K + 1;
+                            LQA[self][K] := GQA[I]; \* INV: GQA[first+1..last] always not null
+                            I := I + 1;
+                        end while;
+                    UpdateGQAPointers2:
+                        GQAFirst := I - 1;
+                    UpdateGQAPointersCheck2:                        
+                        if GQAFirst > GQSize then
+                            GQAFirst := GQAFirst - GQSize;
+                            GQALast := GQALast - GQSize;
+                            GQPPPointer := GQPPPointer - GQSize;
+                        end if;
+                    PushPullBegin:
+                        GQPPPointer := IF GQPPPointer <= GQAFirst THEN GQAFirst + 1 ELSE GQPPPointer + 1;
+                        I := GQPPPointer;
+                        K := 1;
+                        PerformFirstPushPull:
+                            if GQPPPointer <= GQALast /\ K <= LQASizes[self] then
+                                task := LQA[K];
+                                LQA[K] := GQA[((GQPPPointer - 1) % GQ) + 1];
+                                GQA[((GQPPPointer - 1) % GQ) + 1] := task;
+                                GQPPPointer := IF GQPPPointer < GQALast THEN GQPPPointer + 1 ELSE GQAFirst + 1;
+                                K := K + 1;
+                            else
+                                goto AttemptEnqueueFromGlobalFinish2;
+                            end if;
+                    PushPull:
+                        while GQPPPointer # I /\ K <= LQASizes[self] do
+                            PerformPushPull:
+                                task := LQA[K];
+                                LQA[K] := GQA[((GQPPPointer - 1) % GQ) + 1];
+                                GQA[((GQPPPointer - 1) % GQ) + 1] := task;
+                            PushPullStep:
+                                GQPPPointer := IF GQPPPointer < GQALast THEN GQPPPointer + 1 ELSE GQAFirst + 1;
+                                K := K + 1;
+                        end while;
+                    AttemptEnqueueFromGlobalFinish2:
+                        GQLock := NullLock;
+                end if;
+            LQ_Poll_KQ:
                 if KQueues[self] # NullKQ then
                     LQ_Poll_KQ_Begin:
                         kq_out := SubSeq(KQueues[self].available, 1, MinNum(KQPollNum, Len(KQueues[self].available)));
@@ -399,79 +560,81 @@ begin
                                         !.blocked_io_info.eof = kq_out[x].eof
                                     ]
                             ELSE LQB[self][i]];
-                        I := 1;
-                        K := 0;
-                    Flush_Ready:
-                        while I <= LQBSizes[self] do
-                            Flush_Check_Timer:
-                                if LQB[self][I].state = TSBTimer then
-                                    either
-                                        LQB[self][I].state := TSReady; \* Timer finished
-                                    or
-                                        skip; \* Timer didn't finish
-                                    end either;
-                                end if;
-                            Flush_Ready_Check_Ready:
-                                if LQB[self][I].state = TSReady then
-                                    \* Push to LQA
-                                    CheckLQSize:
-                                    if LQASizes[self] = LQSize then
-                                        LockGQ:
-                                            await GQLock = NullLock;
-                                            GQLock := self;
-                                            L := LQSize \div 2 + 1;
-                                        PushGQLoop:
-                                            while L < LQSize do
-                                            PushGQStatusCheck:
-                                                if LQA[self][L] # NullTask then
-                                                PushTaskNotNull:
-                                                    if LQA[self][L].state = TSReady then
-                                                        GQALast := GQALast + 1;
-                                                        GQA[((GQALast - 1) % GQSize) + 1] := LQA[self][L];
-                                                        LQA[self][L] := NullTask;
-                                                    elsif LQA[self][L].state \in {TSBTimer, TSBIO} then
-                                                            GQBSize := GQBSize + 1;
-                                                            GQB[GQBSize] := LQA[self][L];
-                                                            LQA[self][L] := NullTask;
-                                                            if KQueues[0] = NullKQ then
-                                                                KQueues[0] := NewKQ;
-                                                            end if;
-                                                            PushGQPushToKQ:
-                                                                if GQB[GQBSize].state = TSBIO then
-                                                                    KQueues[0].waiting := Append (KQueues[0].waiting, [ fd |-> GQB[GQBSize].blocked_io_info.fd, kind |-> GQB[GQBSize].blocked_io_info.ty, data |-> 0, eof |-> FALSE, t_id |-> GQB[GQBSize].t_id ]);
-                                                                end if;
-                                                    end if;
-                                                end if;
-                                            GQPushWhileStep:
-                                                L := L + 1;
-                                            end while;
-                                        UnlockGQ:
-                                            GQLock := NullLock;
-                                            LQASizes[self] := LQSize \div 2;
-                                        CheckClock:
-                                            if LQAClock[self] > LQASizes[self] then
-                                                LQASizes[self] := LQASizes[self] + 1;
-                                                LQA[self] := [LQA[self] EXCEPT ![LQASizes[self]] = LQA[self][LQAClock[self]], ![LQAClock[self]] = NullTask];
-                                                LQAClock[self] := LQASizes[self];
-                                            end if;
-                                    end if;
-                                    PushLQ:
-                                    LQASizes[self] := LQASizes[self] + 1; 
-                                    LQA[self][LQASizes[self]] := LQB[self][I];
-                                else
-                                    K := K + 1;
-                                    LQB[self][K] := LQB[self][I];
-                                    if I # K then
-                                        Flush_Ready_Check_Ready_Move_Old:
-                                        LQB[self][I] := NullTask;
-                                    end if;
-                                end if;
-                            Flush_Ready_Step:
-                                I := I + 1;
-                        end while;
-                    Flush_Ready_Done:
-                        LQBSizes[self] := K;
                 end if;
+                Flush_Ready_Begin:
+                    I := 1;
+                    K := 0;
+                Flush_Ready:
+                    while I <= LQBSizes[self] do
+                        Flush_Check_Timer:
+                            if LQB[self][I].state = TSBTimer then
+                                either
+                                    LQB[self][I].state := TSReady; \* Timer finished
+                                or
+                                    skip; \* Timer didn't finish
+                                end either;
+                            end if;
+                        Flush_Ready_Check_Ready:
+                            if LQB[self][I].state = TSReady then
+                                \* Push to LQA
+                                CheckLQSize:
+                                if LQASizes[self] = LQSize then
+                                    LockGQ:
+                                        await GQLock = NullLock;
+                                        GQLock := self;
+                                        L := LQSize \div 2 + 1;
+                                    PushGQLoop:
+                                        while L < LQSize do
+                                        PushGQStatusCheck:
+                                            if LQA[self][L] # NullTask then
+                                            PushTaskNotNull:
+                                                if LQA[self][L].state = TSReady then
+                                                    GQALast := GQALast + 1;
+                                                    GQA[((GQALast - 1) % GQSize) + 1] := LQA[self][L];
+                                                    LQA[self][L] := NullTask;
+                                                elsif LQA[self][L].state \in {TSBTimer, TSBIO} then
+                                                        GQBSize := GQBSize + 1;
+                                                        GQB[GQBSize] := LQA[self][L];
+                                                        LQA[self][L] := NullTask;
+                                                        if KQueues[0] = NullKQ then
+                                                            KQueues[0] := NewKQ;
+                                                        end if;
+                                                        PushGQPushToKQ:
+                                                            if GQB[GQBSize].state = TSBIO then
+                                                                KQueues[0].waiting := Append (KQueues[0].waiting, [ fd |-> GQB[GQBSize].blocked_io_info.fd, kind |-> GQB[GQBSize].blocked_io_info.ty, data |-> 0, eof |-> FALSE, t_id |-> GQB[GQBSize].t_id ]);
+                                                            end if;
+                                                end if;
+                                            end if;
+                                        GQPushWhileStep:
+                                            L := L + 1;
+                                        end while;
+                                    UnlockGQ:
+                                        GQLock := NullLock;
+                                        LQASizes[self] := LQSize \div 2;
+                                    CheckClock:
+                                        if LQAClock[self] > LQASizes[self] then
+                                            LQASizes[self] := LQASizes[self] + 1;
+                                            LQA[self] := [LQA[self] EXCEPT ![LQASizes[self]] = LQA[self][LQAClock[self]], ![LQAClock[self]] = NullTask];
+                                            LQAClock[self] := LQASizes[self];
+                                        end if;
+                                end if;
+                                PushLQ:
+                                LQASizes[self] := LQASizes[self] + 1; 
+                                LQA[self][LQASizes[self]] := LQB[self][I];
+                                TaskReadyAges[LQA[self][LQASizes[self]].t_id] := 0;
+                            else
+                                K := K + 1;
+                                LQB[self][K] := LQB[self][I];
+                                if I # K then
+                                    Flush_Ready_Check_Ready_Move_Old:
+                                    LQB[self][I] := NullTask;
+                                end if;
+                            end if;
+                        Flush_Ready_Step:
+                            I := I + 1;
+                    end while;
+                Flush_Ready_Done:
+                    LQBSizes[self] := K;
             LQ_Reset_Clock:
                 LQAClock[self] := LQASizes[self] + 1;
                 \* fetch next task (opt)
@@ -499,7 +662,7 @@ begin
                         GQLock := self;
                     GQ_Poll_Check_KQ:
                         if KQueues[0] = NullKQ then
-                            goto GQ_Flush_Ready;
+                            goto GQ_Flush_Ready_Begin;
                         end if;
                     GQ_Poll_KQ_Begin:
                         kq_out := SubSeq(KQueues[0].available, 1, MinNum(KQPollNum, Len(KQueues[0].available)));
@@ -517,6 +680,7 @@ begin
                                         !.blocked_io_info.eof = kq_out[x].eof
                                     ]
                             ELSE GQB[i]];
+                    GQ_Flush_Ready_Begin:
                         I := 1;
                         K := 0;
                     GQ_Flush_Ready:
@@ -534,6 +698,7 @@ begin
                                     \* Push to GQA
                                     GQALast := GQALast + 1;
                                     GQA[((GQALast - 1) % GQSize) + 1] := GQB[I];
+                                    TaskReadyAges[GQB[I].t_id] := 0;
                                 else
                                     K := K + 1;
                                     GQB[K] := GQB[I];
@@ -557,6 +722,7 @@ begin
                         if GQAFirst > GQSize then
                             GQAFirst := GQAFirst - GQSize;
                             GQALast := GQALast - GQSize;
+                            GQPPPointer := GQPPPointer - GQSize;
                         end if;
                     AttemptEnqueueFromGlobalFinish:
                         GQLock := NullLock;
@@ -622,8 +788,6 @@ begin
                                     end while;
                                 WorkStealingUnlockVictimLock2:
                                     LQLocks[I] := NullLock;
-                                WorkStealing2MoveToSelf:
-                                    \* No need to acquire lock here, this can be done atomically
                                     LQA[self] := lqbuf;
                                     LQASizes[self] := K;
                                     LQAClock[self] := K + 1;
@@ -641,26 +805,38 @@ begin
                     Has_Work_Loop:
                         while HasWork = TRUE do
                             DoFuturePoll:
+                                await RoundRobinToken = self; \* Aquire RR token
+                                TaskReadyAges := [x \in DOMAIN TaskReadyAges |-> IF TaskReadyAges[x] = NullTRA THEN NullTRA ELSE TaskReadyAges[x] + 1]; \* Poll task
+                                RoundRobinToken := IF self + 1 \in Workers THEN self + 1 ELSE 1; \* release RR token
                                 \* Poll future
                                 FutureWorkers[task.future] := self;
                                 FuturesBlocked[task.future] := NullFB;
                                 Futures[task.future] := FSPolling;
                             ProcessStatus:
                                 await Futures[task.future] # FSPolling;
+                            ProcessStatusInLQ:
+                                await LQLocks[self] = NullLock;
+                                LQLocks[self] := self;
                                 if Futures[task.future] = FSReturned then
                                     if FuturesBlocked[task.future] # NullFB then
                                         if FuturesBlocked[task.future].kind \in {FBKindRead, FBKindWrite} then
                                             LQA[self][LQAClock[self]] := [LQA[self][LQAClock[self]] EXCEPT !.state = TSBIO, !.blocked_io_info = [fd |-> FuturesBlocked[task.future].fd, ty |-> FuturesBlocked[task.future].kind, data |-> 0, eof |-> FALSE]];
+                                            TaskReadyAges[LQA[self][LQAClock[self]].t_id] := NullTRA;
                                         elsif FuturesBlocked[task.future].kind = FBKindTimer then
                                             LQA[self][LQAClock[self]] := [LQA[self][LQAClock[self]] EXCEPT !.state = TSBTimer];
+                                            TaskReadyAges[LQA[self][LQAClock[self]].t_id] := NullTRA;
                                         end if;
                                     else
                                         LQA[self][LQAClock[self]].state := TSReady;
+                                        TaskReadyAges[LQA[self][LQAClock[self]].t_id] := 0;
                                     end if;
                                 else
+                                    TaskReadyAges[LQA[self][LQAClock[self]].t_id] := NullTRA;
                                     LQA[self][LQAClock[self]] := NullTask;
                                     TasksFinished := TasksFinished + 1;
                                 end if;
+                            LQ_Unlock_AfterProc:
+                                LQLocks[self] := NullLock;
                                 \* Fetch next task
                             LQ_Lock2:
                                 await LQLocks[self] = NullLock;
@@ -832,6 +1008,10 @@ begin
                 Cont4:
                     await Futures[self] = FSPolling;
             or
+                Futures[self] := FSReturned; \* keep task as ready
+                Cont5:
+                    await Futures[self] = FSPolling;      
+            or
                 goto OtherFutureDone;
             end either;
         end while;
@@ -843,76 +1023,27 @@ end process;
 
 \*** End of client code
 
-\*** Now we quickly abstract away the kernel, in the following process
-
-fair+ process Kernel = KernelProcessId
-variables
-\*    I = 0;
-\*    IndUpd = ESeq;
-begin
-    KEntry:
-        await RTStarted = TRUE;
-    KLoop:
-        while ~ RTStopped do
-                await KContinueLock = TRUE;
-                FDReadsAvailable := [x \in DOMAIN FDReadsAvailable |-> FDReadsAvailable[x] + 64];
-                FDWritesAvailable := [x \in DOMAIN FDWritesAvailable |-> FDWritesAvailable[x] + 16];
-                KQueues := [kq \in DOMAIN KQueues |->
-                    IF KQueues[kq] = NullKQ
-                    THEN NullKQ
-                    ELSE LET
-                        IndUpd == [p \in DOMAIN KQueues[kq].waiting |-> [index |-> p, data |->
-                            (CASE KQueues[kq].waiting[p].kind = KQWaitKindRead -> FDReadsAvailable[KQueues[kq].waiting[p].fd]
-                              [] KQueues[kq].waiting[p].kind = KQWaitKindWrite -> FDWritesAvailable[KQueues[kq].waiting[p].fd]) ]]
-                    IN [waiting |-> [p \in DOMAIN KQueues[kq].waiting \ {IndUpd[p].index : p \in DOMAIN IndUpd} |-> KQueues[kq].waiting[p]],
-                        available |->
-                            KQueues[kq].available \o [p \in DOMAIN IndUpd |-> [KQueues[kq].waiting[IndUpd[p].index] EXCEPT !.data = IndUpd[p].data, !.eof = FALSE]]]
-                ];
-                KContinueLock := FALSE;
-                Worker_Wakeup := TRUE;
-\*                I := 0;
-\*                K_KQUpdLoop:
-\*                while I <= NumWorkers do
-\*                    K_KQUpdLoopCheckNull:
-\*                        if KQueues[I] = NullKQ then
-\*                            goto K_KQUpdLoopInc;
-\*                        end if;
-\*                    K_KQUpdLoopBody:
-\*                        IndUpd := [p \in DOMAIN KQueues[I].waiting |-> [index |-> p, data |->
-\*                            (CASE KQueues[I].waiting[p].kind = KQWaitKindRead -> FDReadsAvailable[KQueues[I].waiting[p].fd]
-\*                              [] KQueues[I].waiting[p].kind = KQWaitKindWrite -> FDWritesAvailable[KQueues[I].waiting[p].fd]) ]];
-\*                        KQueues[I] := [ waiting |-> [p \in DOMAIN KQueues[I].waiting \ [p \in DOMAIN IndUpd |-> IndUpd[p].index] |-> KQueues[I].waiting[p]],
-\*                                        available |-> KQueues[I].available \o [p \in DOMAIN IndUpd |-> [KQueues[I].waiting[IndUpd[p].index] EXCEPT !.data = IndUpd[p].data, !.eof = FALSE]]
-\*                                      ];
-\*                    K_KQUpdLoopInc:
-\*                        I := I + 1;
-\*                end while;
-        end while;
-        KDone:
-            skip;
-end process;
-
 end algorithm; *)
-\* BEGIN TRANSLATION (chksum(pcal) = "846d03ae" /\ chksum(tla) = "1a93d7b")
-\* Label CheckLQSize of process WorkerThread at line 418 col 37 changed to CheckLQSize_
-\* Label LockGQ of process WorkerThread at line 420 col 45 changed to LockGQ_
-\* Label PushGQLoop of process WorkerThread at line 424 col 45 changed to PushGQLoop_
-\* Label PushGQStatusCheck of process WorkerThread at line 426 col 49 changed to PushGQStatusCheck_
-\* Label PushTaskNotNull of process WorkerThread at line 428 col 53 changed to PushTaskNotNull_
-\* Label PushGQPushToKQ of process WorkerThread at line 440 col 65 changed to PushGQPushToKQ_
-\* Label GQPushWhileStep of process WorkerThread at line 446 col 49 changed to GQPushWhileStep_
-\* Label UnlockGQ of process WorkerThread at line 449 col 45 changed to UnlockGQ_
-\* Label CheckClock of process WorkerThread at line 452 col 45 changed to CheckClock_
-\* Label PushLQ of process WorkerThread at line 459 col 37 changed to PushLQ_
-\* Process variable tid of process RTSpawn at line 275 col 5 changed to tid_
-\* Process variable I of process WorkerThread at line 296 col 5 changed to I_
-\* Process variable fildes of process RF at line 772 col 5 changed to fildes_
-\* Process variable Steps of process RF at line 773 col 5 changed to Steps_
-VARIABLES pc, GQA, GQAFirst, GQALast, GQB, GQBSize, GQLock, LQA, LQAClock, 
-          LQASizes, LQB, LQBSizes, LQLocks, TaskIdCurrent, TasksFinished, 
-          RTStarted, RTStopped, Futures, FuturePush, FuturesBlocked, 
-          FutureWorkers, FDReadsAvailable, FDWritesAvailable, KQueues, 
-          KContinueLock, Worker_Wakeup
+\* BEGIN TRANSLATION (chksum(pcal) = "9fcff08e" /\ chksum(tla) = "f87e0d80")
+\* Label CheckLQSize of process WorkerThread at line 581 col 33 changed to CheckLQSize_
+\* Label LockGQ of process WorkerThread at line 583 col 41 changed to LockGQ_
+\* Label PushGQLoop of process WorkerThread at line 587 col 41 changed to PushGQLoop_
+\* Label PushGQStatusCheck of process WorkerThread at line 589 col 45 changed to PushGQStatusCheck_
+\* Label PushTaskNotNull of process WorkerThread at line 591 col 49 changed to PushTaskNotNull_
+\* Label PushGQPushToKQ of process WorkerThread at line 603 col 61 changed to PushGQPushToKQ_
+\* Label GQPushWhileStep of process WorkerThread at line 609 col 45 changed to GQPushWhileStep_
+\* Label UnlockGQ of process WorkerThread at line 612 col 41 changed to UnlockGQ_
+\* Label CheckClock of process WorkerThread at line 615 col 41 changed to CheckClock_
+\* Label PushLQ of process WorkerThread at line 622 col 33 changed to PushLQ_
+\* Process variable tid of process RTSpawn at line 317 col 5 changed to tid_
+\* Process variable I of process WorkerThread at line 336 col 5 changed to I_
+\* Process variable fildes of process RF at line 948 col 5 changed to fildes_
+\* Process variable Steps of process RF at line 949 col 5 changed to Steps_
+VARIABLES pc, GQA, GQAFirst, GQALast, GQB, GQBSize, GQPPPointer, GQLock, LQA, 
+          LQAClock, ClkCycles, LQASizes, LQB, LQBSizes, LQLocks, 
+          TaskIdCurrent, TasksFinished, RTStarted, RTStopped, Futures, 
+          FuturePush, FuturesBlocked, FutureWorkers, FDReadsAvailable, 
+          FDWritesAvailable, KQueues, TaskReadyAges, RoundRobinToken
 
 (* define statement *)
 AllTasksDone == RTStarted = TRUE /\ TaskIdCurrent = TasksFinished
@@ -929,15 +1060,45 @@ AllNullTasksAfterDone ==
 NoDuplicateTasks ==
     /\ \A w1, w2 \in Workers: (LQLocks[w1] = NullLock /\ LQLocks[w2] = NullLock) => \A p1, p2 \in LQ: (w1 # w2) \/ (w1 = w2 /\ p1 # p2) => (LQA[w1][p1] # NullTask /\ LQA[w2][p2] # NullTask => LQA[w1][p1].t_id # LQA[w2][p2].t_id)
 GlobalQueueActiveReady == \A p \in GQAFirst + 1 .. GQALast: GQA[p] # NullTask /\ GQA[p].state = TSReady
+QBFDIs(T, kind, fd) == T # NullTask /\ T.state = TSBIO /\ T.blocked_io_info.fd = fd /\ T.blocked_io_info.ty = kind
+KQHasFd(Q, kind, fd) == Len(SelectSeq(Q.waiting \o Q.available, LAMBDA x: x.fd = fd /\ x.kind = kind)) = 1
+BlockedInKQueue ==
+    /\ \A w \in Workers: LQLocks[w] = NullLock /\ KQueues[w] # NullKQ => (\A fd \in FDs: \A kind \in BlockedIOKindType: (\E p \in LQ: QBFDIs(LQB[w][p], kind, fd)) <=> KQHasFd(KQueues[w], kind, fd))
+    /\ (GQLock = NullLock /\ KQueues[0] # NullKQ => (\A fd \in FDs: \A kind \in BlockedIOKindType: (\E p \in GQ: QBFDIs(GQB[p], kind, fd)) <=> KQHasFd(KQueues[0], kind, fd)))
+TaskReadyAgesHasProperLength == Len(TaskReadyAges) = TaskIdCurrent
+ReadyTasksAlwaysHaveNaturalAges ==
+    /\ \A w \in Workers: \A i \in LQ: LQA[w][i] # NullTask /\ LQA[w][i].state = TSReady => TaskReadyAges[LQA[w][i].t_id] >= 0
+    /\ \A i \in GQAFirst + 1 .. GQALast: TaskReadyAges[GQA[i].t_id] >= 0
+BlockedTasksHaveAgeMinusOne ==
+    /\ \A w \in Workers: \A i \in LQ: LQA[w][i] # NullTask /\ LQA[w][i].state \in {TSBIO, TSBTimer} => TaskReadyAges[LQA[w][i].t_id] = NullTRA
+    /\ \A w \in Workers: \A i \in LQ: LQB[w][i] # NullTask /\ LQB[w][i].state \in {TSBIO, TSBTimer} => TaskReadyAges[LQB[w][i].t_id] = NullTRA
+    /\ \A i \in GQ: GQB[i] # NullTask => TaskReadyAges[GQB[i].t_id] < 0
+
+GQAFirstSmallerThanLast == GQAFirst <= GQALast
+GQASizesDoNotOverflow == (GQAFirst < GQALast => GQALast <= GQAFirst + GQSize)
+
+GQPPPointerProper == GQPPPointer \in GQAFirst..GQALast
+
+PollingFuturesHaveAssociatedWorkers == \A f \in AllFutures: (Futures[f] = FSPolling => FutureWorkers[f] \in Workers)
+RRTokenInWorkers == RoundRobinToken \in Workers
+
+TaskReadyAgesIsBounded == \A t \in 1..TaskIdCurrent: TaskReadyAges[t] # NullTRA => TaskReadyAges[t] <= (NumClockCyclesBeforeGQPushPull + 1) * NumWorkers * (TaskIdCurrent - TasksFinished)
 
 Safety ==
-    /\ GQAFirst <= GQALast
-    /\ (GQAFirst < GQALast => GQALast <= GQAFirst + GQSize)
+    /\ GQAFirstSmallerThanLast
+    /\ GQASizesDoNotOverflow
+    /\ GQPPPointerProper
     /\ GlobalQueueActiveReady
     /\ TasksFinished <= TaskIdCurrent
-    /\ \A f \in AllFutures: (Futures[f] = FSPolling => FutureWorkers[f] \in Workers)
+    /\ PollingFuturesHaveAssociatedWorkers
     /\ NoNullTasksInFrontOfLQAClock
     /\ NoDuplicateTasks
+    /\ BlockedInKQueue
+    /\ TaskReadyAgesHasProperLength
+    /\ ReadyTasksAlwaysHaveNaturalAges
+    /\ BlockedTasksHaveAgeMinusOne
+    /\ RRTokenInWorkers
+    /\ TaskReadyAgesIsBounded
 
 Liveness ==
     /\ WorkersStopOnceRTFlags
@@ -954,6 +1115,7 @@ TypeInvariant ==
     /\ GQLock \in GQLockType
     /\ LQA \in LQGlobalType
     /\ LQAClock \in LQClocksType
+    /\ ClkCycles \in ClkCyclesType
     /\ LQASizes \in LQSizesType
     /\ LQB \in LQGlobalType
     /\ LQBSizes \in LQSizesType
@@ -967,21 +1129,20 @@ TypeInvariant ==
     /\ FuturesBlocked \in FBListType
     /\ FutureWorkers \in FutureWorkesListType
     /\ KQueues \in KQueuesType
-    /\ KContinueLock \in BOOLEAN
-    /\ Worker_Wakeup \in BOOLEAN
+    /\ TaskReadyAges \in TaskReadyAgesType
 
 VARIABLES tid_, task, HasWork, I_, J, K, L, kq_out, current_time, lqbuf, wr, 
           tid, I, fildes_, Steps_, fildes, Steps, PolledRead
 
-vars == << pc, GQA, GQAFirst, GQALast, GQB, GQBSize, GQLock, LQA, LQAClock, 
-           LQASizes, LQB, LQBSizes, LQLocks, TaskIdCurrent, TasksFinished, 
-           RTStarted, RTStopped, Futures, FuturePush, FuturesBlocked, 
-           FutureWorkers, FDReadsAvailable, FDWritesAvailable, KQueues, 
-           KContinueLock, Worker_Wakeup, tid_, task, HasWork, I_, J, K, L, 
-           kq_out, current_time, lqbuf, wr, tid, I, fildes_, Steps_, fildes, 
-           Steps, PolledRead >>
+vars == << pc, GQA, GQAFirst, GQALast, GQB, GQBSize, GQPPPointer, GQLock, LQA, 
+           LQAClock, ClkCycles, LQASizes, LQB, LQBSizes, LQLocks, 
+           TaskIdCurrent, TasksFinished, RTStarted, RTStopped, Futures, 
+           FuturePush, FuturesBlocked, FutureWorkers, FDReadsAvailable, 
+           FDWritesAvailable, KQueues, TaskReadyAges, RoundRobinToken, tid_, 
+           task, HasWork, I_, J, K, L, kq_out, current_time, lqbuf, wr, tid, 
+           I, fildes_, Steps_, fildes, Steps, PolledRead >>
 
-ProcSet == {0} \cup (Workers) \cup (TaskPusherProcesses) \cup ({RootFuture}) \cup (OtherFutures) \cup {KernelProcessId}
+ProcSet == {0} \cup (Workers) \cup (TaskPusherProcesses) \cup ({RootFuture}) \cup (OtherFutures)
 
 Init == (* Global variables *)
         /\ GQA = [p \in GQ |-> NullTask]
@@ -989,9 +1150,11 @@ Init == (* Global variables *)
         /\ GQALast = 0
         /\ GQB = [p \in GQ |-> NullTask]
         /\ GQBSize = 0
+        /\ GQPPPointer = 0
         /\ GQLock = NullLock
         /\ LQA = [w \in Workers |-> [p \in LQ |-> NullTask]]
         /\ LQAClock = [w \in Workers |-> 0]
+        /\ ClkCycles = [w \in Workers |-> 0]
         /\ LQASizes = [w \in Workers |-> 0]
         /\ LQB = [w \in Workers |-> [p \in LQ |-> NullTask]]
         /\ LQBSizes = [w \in Workers |-> 0]
@@ -1007,8 +1170,8 @@ Init == (* Global variables *)
         /\ FDReadsAvailable = [fd \in FDs |-> 0]
         /\ FDWritesAvailable = [fd \in FDs |-> 0]
         /\ KQueues = [kq \in KQ |-> NullKQ]
-        /\ KContinueLock = FALSE
-        /\ Worker_Wakeup = FALSE
+        /\ TaskReadyAges = ESeq
+        /\ RoundRobinToken = 1
         (* Process RTSpawn *)
         /\ tid_ = 0
         (* Process WorkerThread *)
@@ -1036,59 +1199,60 @@ Init == (* Global variables *)
                                         [] self \in Workers -> "WWait"
                                         [] self \in TaskPusherProcesses -> "TPPLoop"
                                         [] self \in {RootFuture} -> "RootFutureAwaitStarted"
-                                        [] self \in OtherFutures -> "OtherFutureStarted"
-                                        [] self = KernelProcessId -> "KEntry"]
+                                        [] self \in OtherFutures -> "OtherFutureStarted"]
 
 RTGetNext == /\ pc[0] = "RTGetNext"
              /\ TaskIdCurrent' = TaskIdCurrent + 1
+             /\ TaskReadyAges' = Append(TaskReadyAges, 0)
              /\ tid_' = TaskIdCurrent'
              /\ pc' = [pc EXCEPT ![0] = "RTSpawnInit"]
-             /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, GQLock, LQA, 
-                             LQAClock, LQASizes, LQB, LQBSizes, LQLocks, 
-                             TasksFinished, RTStarted, RTStopped, Futures, 
-                             FuturePush, FuturesBlocked, FutureWorkers, 
-                             FDReadsAvailable, FDWritesAvailable, KQueues, 
-                             KContinueLock, Worker_Wakeup, task, HasWork, I_, 
-                             J, K, L, kq_out, current_time, lqbuf, wr, tid, I, 
-                             fildes_, Steps_, fildes, Steps, PolledRead >>
+             /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, GQPPPointer, 
+                             GQLock, LQA, LQAClock, ClkCycles, LQASizes, LQB, 
+                             LQBSizes, LQLocks, TasksFinished, RTStarted, 
+                             RTStopped, Futures, FuturePush, FuturesBlocked, 
+                             FutureWorkers, FDReadsAvailable, 
+                             FDWritesAvailable, KQueues, RoundRobinToken, task, 
+                             HasWork, I_, J, K, L, kq_out, current_time, lqbuf, 
+                             wr, tid, I, fildes_, Steps_, fildes, Steps, 
+                             PolledRead >>
 
 RTSpawnInit == /\ pc[0] = "RTSpawnInit"
                /\ LQA' = [LQA EXCEPT ![1][1] = [ t_id |-> tid_, state |-> TSReady, future |-> RootFuture, blocked_io_info |-> NullBlockedIOInfoType ]]
                /\ LQASizes' = [LQASizes EXCEPT ![1] = 1]
                /\ pc' = [pc EXCEPT ![0] = "RTStart"]
-               /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, GQLock, 
-                               LQAClock, LQB, LQBSizes, LQLocks, TaskIdCurrent, 
-                               TasksFinished, RTStarted, RTStopped, Futures, 
-                               FuturePush, FuturesBlocked, FutureWorkers, 
-                               FDReadsAvailable, FDWritesAvailable, KQueues, 
-                               KContinueLock, Worker_Wakeup, tid_, task, 
-                               HasWork, I_, J, K, L, kq_out, current_time, 
-                               lqbuf, wr, tid, I, fildes_, Steps_, fildes, 
-                               Steps, PolledRead >>
+               /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
+                               GQPPPointer, GQLock, LQAClock, ClkCycles, LQB, 
+                               LQBSizes, LQLocks, TaskIdCurrent, TasksFinished, 
+                               RTStarted, RTStopped, Futures, FuturePush, 
+                               FuturesBlocked, FutureWorkers, FDReadsAvailable, 
+                               FDWritesAvailable, KQueues, TaskReadyAges, 
+                               RoundRobinToken, tid_, task, HasWork, I_, J, K, 
+                               L, kq_out, current_time, lqbuf, wr, tid, I, 
+                               fildes_, Steps_, fildes, Steps, PolledRead >>
 
 RTStart == /\ pc[0] = "RTStart"
            /\ RTStarted' = TRUE
            /\ pc' = [pc EXCEPT ![0] = "RTFinish"]
-           /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, GQLock, LQA, 
-                           LQAClock, LQASizes, LQB, LQBSizes, LQLocks, 
-                           TaskIdCurrent, TasksFinished, RTStopped, Futures, 
-                           FuturePush, FuturesBlocked, FutureWorkers, 
-                           FDReadsAvailable, FDWritesAvailable, KQueues, 
-                           KContinueLock, Worker_Wakeup, tid_, task, HasWork, 
-                           I_, J, K, L, kq_out, current_time, lqbuf, wr, tid, 
-                           I, fildes_, Steps_, fildes, Steps, PolledRead >>
+           /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, GQPPPointer, 
+                           GQLock, LQA, LQAClock, ClkCycles, LQASizes, LQB, 
+                           LQBSizes, LQLocks, TaskIdCurrent, TasksFinished, 
+                           RTStopped, Futures, FuturePush, FuturesBlocked, 
+                           FutureWorkers, FDReadsAvailable, FDWritesAvailable, 
+                           KQueues, TaskReadyAges, RoundRobinToken, tid_, task, 
+                           HasWork, I_, J, K, L, kq_out, current_time, lqbuf, 
+                           wr, tid, I, fildes_, Steps_, fildes, Steps, 
+                           PolledRead >>
 
 RTFinish == /\ pc[0] = "RTFinish"
             /\ TaskIdCurrent = TasksFinished
             /\ RTStopped' = TRUE
-            /\ KContinueLock' = TRUE
-            /\ Worker_Wakeup' = TRUE
             /\ pc' = [pc EXCEPT ![0] = "Done"]
-            /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, GQLock, LQA, 
-                            LQAClock, LQASizes, LQB, LQBSizes, LQLocks, 
-                            TaskIdCurrent, TasksFinished, RTStarted, Futures, 
-                            FuturePush, FuturesBlocked, FutureWorkers, 
-                            FDReadsAvailable, FDWritesAvailable, KQueues, tid_, 
+            /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, GQPPPointer, 
+                            GQLock, LQA, LQAClock, ClkCycles, LQASizes, LQB, 
+                            LQBSizes, LQLocks, TaskIdCurrent, TasksFinished, 
+                            RTStarted, Futures, FuturePush, FuturesBlocked, 
+                            FutureWorkers, FDReadsAvailable, FDWritesAvailable, 
+                            KQueues, TaskReadyAges, RoundRobinToken, tid_, 
                             task, HasWork, I_, J, K, L, kq_out, current_time, 
                             lqbuf, wr, tid, I, fildes_, Steps_, fildes, Steps, 
                             PolledRead >>
@@ -1098,45 +1262,75 @@ RTSpawn == RTGetNext \/ RTSpawnInit \/ RTStart \/ RTFinish
 WWait(self) == /\ pc[self] = "WWait"
                /\ RTStarted = TRUE
                /\ pc' = [pc EXCEPT ![self] = "Main_Loop"]
-               /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, GQLock, 
-                               LQA, LQAClock, LQASizes, LQB, LQBSizes, LQLocks, 
-                               TaskIdCurrent, TasksFinished, RTStarted, 
-                               RTStopped, Futures, FuturePush, FuturesBlocked, 
-                               FutureWorkers, FDReadsAvailable, 
-                               FDWritesAvailable, KQueues, KContinueLock, 
-                               Worker_Wakeup, tid_, task, HasWork, I_, J, K, L, 
-                               kq_out, current_time, lqbuf, wr, tid, I, 
-                               fildes_, Steps_, fildes, Steps, PolledRead >>
+               /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
+                               GQPPPointer, GQLock, LQA, LQAClock, ClkCycles, 
+                               LQASizes, LQB, LQBSizes, LQLocks, TaskIdCurrent, 
+                               TasksFinished, RTStarted, RTStopped, Futures, 
+                               FuturePush, FuturesBlocked, FutureWorkers, 
+                               FDReadsAvailable, FDWritesAvailable, KQueues, 
+                               TaskReadyAges, RoundRobinToken, tid_, task, 
+                               HasWork, I_, J, K, L, kq_out, current_time, 
+                               lqbuf, wr, tid, I, fildes_, Steps_, fildes, 
+                               Steps, PolledRead >>
 
 Main_Loop(self) == /\ pc[self] = "Main_Loop"
                    /\ pc' = [pc EXCEPT ![self] = "RTStopCheck"]
                    /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
-                                   GQLock, LQA, LQAClock, LQASizes, LQB, 
-                                   LQBSizes, LQLocks, TaskIdCurrent, 
-                                   TasksFinished, RTStarted, RTStopped, 
-                                   Futures, FuturePush, FuturesBlocked, 
-                                   FutureWorkers, FDReadsAvailable, 
-                                   FDWritesAvailable, KQueues, KContinueLock, 
-                                   Worker_Wakeup, tid_, task, HasWork, I_, J, 
-                                   K, L, kq_out, current_time, lqbuf, wr, tid, 
-                                   I, fildes_, Steps_, fildes, Steps, 
-                                   PolledRead >>
+                                   GQPPPointer, GQLock, LQA, LQAClock, 
+                                   ClkCycles, LQASizes, LQB, LQBSizes, LQLocks, 
+                                   TaskIdCurrent, TasksFinished, RTStarted, 
+                                   RTStopped, Futures, FuturePush, 
+                                   FuturesBlocked, FutureWorkers, 
+                                   FDReadsAvailable, FDWritesAvailable, 
+                                   KQueues, TaskReadyAges, RoundRobinToken, 
+                                   tid_, task, HasWork, I_, J, K, L, kq_out, 
+                                   current_time, lqbuf, wr, tid, I, fildes_, 
+                                   Steps_, fildes, Steps, PolledRead >>
 
 RTStopCheck(self) == /\ pc[self] = "RTStopCheck"
                      /\ IF RTStopped = TRUE \/ TasksFinished = TaskIdCurrent
                            THEN /\ pc' = [pc EXCEPT ![self] = "WFinish"]
-                           ELSE /\ pc' = [pc EXCEPT ![self] = "ProcessQB_LQ_Lock"]
+                           ELSE /\ pc' = [pc EXCEPT ![self] = "Kernel"]
                      /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
-                                     GQLock, LQA, LQAClock, LQASizes, LQB, 
-                                     LQBSizes, LQLocks, TaskIdCurrent, 
-                                     TasksFinished, RTStarted, RTStopped, 
-                                     Futures, FuturePush, FuturesBlocked, 
-                                     FutureWorkers, FDReadsAvailable, 
-                                     FDWritesAvailable, KQueues, KContinueLock, 
-                                     Worker_Wakeup, tid_, task, HasWork, I_, J, 
-                                     K, L, kq_out, current_time, lqbuf, wr, 
-                                     tid, I, fildes_, Steps_, fildes, Steps, 
-                                     PolledRead >>
+                                     GQPPPointer, GQLock, LQA, LQAClock, 
+                                     ClkCycles, LQASizes, LQB, LQBSizes, 
+                                     LQLocks, TaskIdCurrent, TasksFinished, 
+                                     RTStarted, RTStopped, Futures, FuturePush, 
+                                     FuturesBlocked, FutureWorkers, 
+                                     FDReadsAvailable, FDWritesAvailable, 
+                                     KQueues, TaskReadyAges, RoundRobinToken, 
+                                     tid_, task, HasWork, I_, J, K, L, kq_out, 
+                                     current_time, lqbuf, wr, tid, I, fildes_, 
+                                     Steps_, fildes, Steps, PolledRead >>
+
+Kernel(self) == /\ pc[self] = "Kernel"
+                /\ \/ /\ FDReadsAvailable' = [x \in DOMAIN FDReadsAvailable |-> FDReadsAvailable[x] + 64]
+                      /\ FDWritesAvailable' = [x \in DOMAIN FDWritesAvailable |-> FDWritesAvailable[x] + 16]
+                   \/ /\ FDReadsAvailable' = [x \in DOMAIN FDReadsAvailable |-> IF x % 2 = 0 THEN FDReadsAvailable[x] + 64 ELSE FDReadsAvailable[x]]
+                      /\ FDWritesAvailable' = [x \in DOMAIN FDWritesAvailable |-> IF x % 2 = 1 THEN FDWritesAvailable[x] + 16 ELSE FDWritesAvailable[x]]
+                   \/ /\ FDReadsAvailable' = [x \in DOMAIN FDReadsAvailable |-> IF x % 2 = 1 THEN FDReadsAvailable[x] + 64 ELSE FDReadsAvailable[x]]
+                      /\ FDWritesAvailable' = [x \in DOMAIN FDWritesAvailable |-> IF x % 2 = 0 THEN FDWritesAvailable[x] + 16 ELSE FDWritesAvailable[x]]
+                /\ KQueues' =            [kq \in DOMAIN KQueues |->
+                                  IF KQueues[kq] = NullKQ
+                                  THEN NullKQ
+                                  ELSE LET
+                                      IndUpd == [p \in DOMAIN KQueues[kq].waiting |-> [index |-> p, data |->
+                                          (CASE KQueues[kq].waiting[p].kind = KQWaitKindRead -> FDReadsAvailable'[KQueues[kq].waiting[p].fd]
+                                            [] KQueues[kq].waiting[p].kind = KQWaitKindWrite -> FDWritesAvailable'[KQueues[kq].waiting[p].fd]) ]]
+                                  IN [waiting |-> [p \in DOMAIN KQueues[kq].waiting \ {IndUpd[p].index : p \in DOMAIN IndUpd} |-> KQueues[kq].waiting[p]],
+                                      available |->
+                                          KQueues[kq].available \o [p \in DOMAIN IndUpd |-> [KQueues[kq].waiting[IndUpd[p].index] EXCEPT !.data = IndUpd[p].data, !.eof = FALSE]]]
+                              ]
+                /\ pc' = [pc EXCEPT ![self] = "ProcessQB_LQ_Lock"]
+                /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
+                                GQPPPointer, GQLock, LQA, LQAClock, ClkCycles, 
+                                LQASizes, LQB, LQBSizes, LQLocks, 
+                                TaskIdCurrent, TasksFinished, RTStarted, 
+                                RTStopped, Futures, FuturePush, FuturesBlocked, 
+                                FutureWorkers, TaskReadyAges, RoundRobinToken, 
+                                tid_, task, HasWork, I_, J, K, L, kq_out, 
+                                current_time, lqbuf, wr, tid, I, fildes_, 
+                                Steps_, fildes, Steps, PolledRead >>
 
 ProcessQB_LQ_Lock(self) == /\ pc[self] = "ProcessQB_LQ_Lock"
                            /\ LQLocks[self] = NullLock
@@ -1145,15 +1339,15 @@ ProcessQB_LQ_Lock(self) == /\ pc[self] = "ProcessQB_LQ_Lock"
                            /\ K' = [K EXCEPT ![self] = 0]
                            /\ pc' = [pc EXCEPT ![self] = "LQ_Flush_Loop"]
                            /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, 
-                                           GQBSize, GQLock, LQA, LQAClock, 
-                                           LQASizes, LQB, LQBSizes, 
-                                           TaskIdCurrent, TasksFinished, 
-                                           RTStarted, RTStopped, Futures, 
-                                           FuturePush, FuturesBlocked, 
+                                           GQBSize, GQPPPointer, GQLock, LQA, 
+                                           LQAClock, ClkCycles, LQASizes, LQB, 
+                                           LQBSizes, TaskIdCurrent, 
+                                           TasksFinished, RTStarted, RTStopped, 
+                                           Futures, FuturePush, FuturesBlocked, 
                                            FutureWorkers, FDReadsAvailable, 
                                            FDWritesAvailable, KQueues, 
-                                           KContinueLock, Worker_Wakeup, tid_, 
-                                           task, HasWork, J, L, kq_out, 
+                                           TaskReadyAges, RoundRobinToken, 
+                                           tid_, task, HasWork, J, L, kq_out, 
                                            current_time, lqbuf, wr, tid, I, 
                                            fildes_, Steps_, fildes, Steps, 
                                            PolledRead >>
@@ -1161,17 +1355,19 @@ ProcessQB_LQ_Lock(self) == /\ pc[self] = "ProcessQB_LQ_Lock"
 LQ_Flush_Loop(self) == /\ pc[self] = "LQ_Flush_Loop"
                        /\ IF I_[self] <= LQASizes[self]
                              THEN /\ pc' = [pc EXCEPT ![self] = "LQ_Flush_Loop_Inner"]
-                             ELSE /\ pc' = [pc EXCEPT ![self] = "LQ_Poll_KQ"]
+                                  /\ UNCHANGED LQASizes
+                             ELSE /\ LQASizes' = [LQASizes EXCEPT ![self] = K[self]]
+                                  /\ pc' = [pc EXCEPT ![self] = "LQ_GQ_CheckPushPull"]
                        /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
-                                       GQLock, LQA, LQAClock, LQASizes, LQB, 
-                                       LQBSizes, LQLocks, TaskIdCurrent, 
-                                       TasksFinished, RTStarted, RTStopped, 
-                                       Futures, FuturePush, FuturesBlocked, 
-                                       FutureWorkers, FDReadsAvailable, 
-                                       FDWritesAvailable, KQueues, 
-                                       KContinueLock, Worker_Wakeup, tid_, 
-                                       task, HasWork, I_, J, K, L, kq_out, 
-                                       current_time, lqbuf, wr, tid, I, 
+                                       GQPPPointer, GQLock, LQA, LQAClock, 
+                                       ClkCycles, LQB, LQBSizes, LQLocks, 
+                                       TaskIdCurrent, TasksFinished, RTStarted, 
+                                       RTStopped, Futures, FuturePush, 
+                                       FuturesBlocked, FutureWorkers, 
+                                       FDReadsAvailable, FDWritesAvailable, 
+                                       KQueues, TaskReadyAges, RoundRobinToken, 
+                                       tid_, task, HasWork, I_, J, K, L, 
+                                       kq_out, current_time, lqbuf, wr, tid, I, 
                                        fildes_, Steps_, fildes, Steps, 
                                        PolledRead >>
 
@@ -1180,14 +1376,15 @@ LQ_Flush_Loop_Inner(self) == /\ pc[self] = "LQ_Flush_Loop_Inner"
                                    THEN /\ pc' = [pc EXCEPT ![self] = "LQ_Flush_Step"]
                                    ELSE /\ pc' = [pc EXCEPT ![self] = "LQ_Flush_Continue"]
                              /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, 
-                                             GQBSize, GQLock, LQA, LQAClock, 
-                                             LQASizes, LQB, LQBSizes, LQLocks, 
+                                             GQBSize, GQPPPointer, GQLock, LQA, 
+                                             LQAClock, ClkCycles, LQASizes, 
+                                             LQB, LQBSizes, LQLocks, 
                                              TaskIdCurrent, TasksFinished, 
                                              RTStarted, RTStopped, Futures, 
                                              FuturePush, FuturesBlocked, 
                                              FutureWorkers, FDReadsAvailable, 
                                              FDWritesAvailable, KQueues, 
-                                             KContinueLock, Worker_Wakeup, 
+                                             TaskReadyAges, RoundRobinToken, 
                                              tid_, task, HasWork, I_, J, K, L, 
                                              kq_out, current_time, lqbuf, wr, 
                                              tid, I, fildes_, Steps_, fildes, 
@@ -1205,18 +1402,18 @@ LQ_Flush_Continue(self) == /\ pc[self] = "LQ_Flush_Continue"
                                             ELSE /\ pc' = [pc EXCEPT ![self] = "LQ_Flush_Step"]
                                       /\ UNCHANGED << LQA, K >>
                            /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, 
-                                           GQBSize, GQLock, LQAClock, LQASizes, 
-                                           LQB, LQBSizes, LQLocks, 
-                                           TaskIdCurrent, TasksFinished, 
-                                           RTStarted, RTStopped, Futures, 
-                                           FuturePush, FuturesBlocked, 
+                                           GQBSize, GQPPPointer, GQLock, 
+                                           LQAClock, ClkCycles, LQASizes, LQB, 
+                                           LQBSizes, LQLocks, TaskIdCurrent, 
+                                           TasksFinished, RTStarted, RTStopped, 
+                                           Futures, FuturePush, FuturesBlocked, 
                                            FutureWorkers, FDReadsAvailable, 
                                            FDWritesAvailable, KQueues, 
-                                           KContinueLock, Worker_Wakeup, tid_, 
-                                           task, HasWork, I_, J, L, kq_out, 
-                                           current_time, lqbuf, wr, tid, I, 
-                                           fildes_, Steps_, fildes, Steps, 
-                                           PolledRead >>
+                                           TaskReadyAges, RoundRobinToken, 
+                                           tid_, task, HasWork, I_, J, L, 
+                                           kq_out, current_time, lqbuf, wr, 
+                                           tid, I, fildes_, Steps_, fildes, 
+                                           Steps, PolledRead >>
 
 LQ_Flush_Remove_From_Old(self) == /\ pc[self] = "LQ_Flush_Remove_From_Old"
                                   /\ IF I_[self] # K[self]
@@ -1225,7 +1422,8 @@ LQ_Flush_Remove_From_Old(self) == /\ pc[self] = "LQ_Flush_Remove_From_Old"
                                              /\ LQA' = LQA
                                   /\ pc' = [pc EXCEPT ![self] = "LQ_Flush_Step"]
                                   /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, 
-                                                  GQBSize, GQLock, LQAClock, 
+                                                  GQBSize, GQPPPointer, GQLock, 
+                                                  LQAClock, ClkCycles, 
                                                   LQASizes, LQB, LQBSizes, 
                                                   LQLocks, TaskIdCurrent, 
                                                   TasksFinished, RTStarted, 
@@ -1234,29 +1432,30 @@ LQ_Flush_Remove_From_Old(self) == /\ pc[self] = "LQ_Flush_Remove_From_Old"
                                                   FutureWorkers, 
                                                   FDReadsAvailable, 
                                                   FDWritesAvailable, KQueues, 
-                                                  KContinueLock, Worker_Wakeup, 
-                                                  tid_, task, HasWork, I_, J, 
-                                                  K, L, kq_out, current_time, 
-                                                  lqbuf, wr, tid, I, fildes_, 
-                                                  Steps_, fildes, Steps, 
-                                                  PolledRead >>
+                                                  TaskReadyAges, 
+                                                  RoundRobinToken, tid_, task, 
+                                                  HasWork, I_, J, K, L, kq_out, 
+                                                  current_time, lqbuf, wr, tid, 
+                                                  I, fildes_, Steps_, fildes, 
+                                                  Steps, PolledRead >>
 
 Flush_To_LQB_Continuation(self) == /\ pc[self] = "Flush_To_LQB_Continuation"
                                    /\ LQBSizes' = [LQBSizes EXCEPT ![self] = LQBSizes[self] + 1]
                                    /\ LQB' = [LQB EXCEPT ![self][LQBSizes'[self]] = LQA[self][I_[self]]]
                                    /\ pc' = [pc EXCEPT ![self] = "LQ_Push_TO_KQ_Check_Create"]
                                    /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, 
-                                                   GQBSize, GQLock, LQA, 
-                                                   LQAClock, LQASizes, LQLocks, 
-                                                   TaskIdCurrent, 
+                                                   GQBSize, GQPPPointer, 
+                                                   GQLock, LQA, LQAClock, 
+                                                   ClkCycles, LQASizes, 
+                                                   LQLocks, TaskIdCurrent, 
                                                    TasksFinished, RTStarted, 
                                                    RTStopped, Futures, 
                                                    FuturePush, FuturesBlocked, 
                                                    FutureWorkers, 
                                                    FDReadsAvailable, 
                                                    FDWritesAvailable, KQueues, 
-                                                   KContinueLock, 
-                                                   Worker_Wakeup, tid_, task, 
+                                                   TaskReadyAges, 
+                                                   RoundRobinToken, tid_, task, 
                                                    HasWork, I_, J, K, L, 
                                                    kq_out, current_time, lqbuf, 
                                                    wr, tid, I, fildes_, Steps_, 
@@ -1269,8 +1468,9 @@ LQ_Push_TO_KQ_Check_Create(self) == /\ pc[self] = "LQ_Push_TO_KQ_Check_Create"
                                                /\ UNCHANGED KQueues
                                     /\ pc' = [pc EXCEPT ![self] = "LQ_Push_TO_KQ_Push"]
                                     /\ UNCHANGED << GQA, GQAFirst, GQALast, 
-                                                    GQB, GQBSize, GQLock, LQA, 
-                                                    LQAClock, LQASizes, LQB, 
+                                                    GQB, GQBSize, GQPPPointer, 
+                                                    GQLock, LQA, LQAClock, 
+                                                    ClkCycles, LQASizes, LQB, 
                                                     LQBSizes, LQLocks, 
                                                     TaskIdCurrent, 
                                                     TasksFinished, RTStarted, 
@@ -1279,9 +1479,9 @@ LQ_Push_TO_KQ_Check_Create(self) == /\ pc[self] = "LQ_Push_TO_KQ_Check_Create"
                                                     FutureWorkers, 
                                                     FDReadsAvailable, 
                                                     FDWritesAvailable, 
-                                                    KContinueLock, 
-                                                    Worker_Wakeup, tid_, task, 
-                                                    HasWork, I_, J, K, L, 
+                                                    TaskReadyAges, 
+                                                    RoundRobinToken, tid_, 
+                                                    task, HasWork, I_, J, K, L, 
                                                     kq_out, current_time, 
                                                     lqbuf, wr, tid, I, fildes_, 
                                                     Steps_, fildes, Steps, 
@@ -1294,49 +1494,52 @@ LQ_Push_TO_KQ_Push(self) == /\ pc[self] = "LQ_Push_TO_KQ_Push"
                                        /\ UNCHANGED KQueues
                             /\ pc' = [pc EXCEPT ![self] = "LQ_Push_TO_KQ_Push_Cont"]
                             /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, 
-                                            GQBSize, GQLock, LQA, LQAClock, 
-                                            LQASizes, LQB, LQBSizes, LQLocks, 
-                                            TaskIdCurrent, TasksFinished, 
-                                            RTStarted, RTStopped, Futures, 
-                                            FuturePush, FuturesBlocked, 
-                                            FutureWorkers, FDReadsAvailable, 
-                                            FDWritesAvailable, KContinueLock, 
-                                            Worker_Wakeup, tid_, task, HasWork, 
-                                            I_, J, K, L, kq_out, current_time, 
-                                            lqbuf, wr, tid, I, fildes_, Steps_, 
-                                            fildes, Steps, PolledRead >>
+                                            GQBSize, GQPPPointer, GQLock, LQA, 
+                                            LQAClock, ClkCycles, LQASizes, LQB, 
+                                            LQBSizes, LQLocks, TaskIdCurrent, 
+                                            TasksFinished, RTStarted, 
+                                            RTStopped, Futures, FuturePush, 
+                                            FuturesBlocked, FutureWorkers, 
+                                            FDReadsAvailable, 
+                                            FDWritesAvailable, TaskReadyAges, 
+                                            RoundRobinToken, tid_, task, 
+                                            HasWork, I_, J, K, L, kq_out, 
+                                            current_time, lqbuf, wr, tid, I, 
+                                            fildes_, Steps_, fildes, Steps, 
+                                            PolledRead >>
 
 LQ_Push_TO_KQ_Push_Cont(self) == /\ pc[self] = "LQ_Push_TO_KQ_Push_Cont"
                                  /\ LQA' = [LQA EXCEPT ![self][I_[self]] = NullTask]
                                  /\ pc' = [pc EXCEPT ![self] = "LQ_Flush_Step"]
                                  /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, 
-                                                 GQBSize, GQLock, LQAClock, 
-                                                 LQASizes, LQB, LQBSizes, 
-                                                 LQLocks, TaskIdCurrent, 
-                                                 TasksFinished, RTStarted, 
-                                                 RTStopped, Futures, 
+                                                 GQBSize, GQPPPointer, GQLock, 
+                                                 LQAClock, ClkCycles, LQASizes, 
+                                                 LQB, LQBSizes, LQLocks, 
+                                                 TaskIdCurrent, TasksFinished, 
+                                                 RTStarted, RTStopped, Futures, 
                                                  FuturePush, FuturesBlocked, 
                                                  FutureWorkers, 
                                                  FDReadsAvailable, 
                                                  FDWritesAvailable, KQueues, 
-                                                 KContinueLock, Worker_Wakeup, 
-                                                 tid_, task, HasWork, I_, J, K, 
-                                                 L, kq_out, current_time, 
-                                                 lqbuf, wr, tid, I, fildes_, 
-                                                 Steps_, fildes, Steps, 
-                                                 PolledRead >>
+                                                 TaskReadyAges, 
+                                                 RoundRobinToken, tid_, task, 
+                                                 HasWork, I_, J, K, L, kq_out, 
+                                                 current_time, lqbuf, wr, tid, 
+                                                 I, fildes_, Steps_, fildes, 
+                                                 Steps, PolledRead >>
 
 LQ_Flush_To_GQB(self) == /\ pc[self] = "LQ_Flush_To_GQB"
                          /\ J' = [J EXCEPT ![self] = 1]
                          /\ pc' = [pc EXCEPT ![self] = "LQ_Flush_To_GQBLoop1"]
                          /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
-                                         GQLock, LQA, LQAClock, LQASizes, LQB, 
-                                         LQBSizes, LQLocks, TaskIdCurrent, 
-                                         TasksFinished, RTStarted, RTStopped, 
-                                         Futures, FuturePush, FuturesBlocked, 
+                                         GQPPPointer, GQLock, LQA, LQAClock, 
+                                         ClkCycles, LQASizes, LQB, LQBSizes, 
+                                         LQLocks, TaskIdCurrent, TasksFinished, 
+                                         RTStarted, RTStopped, Futures, 
+                                         FuturePush, FuturesBlocked, 
                                          FutureWorkers, FDReadsAvailable, 
                                          FDWritesAvailable, KQueues, 
-                                         KContinueLock, Worker_Wakeup, tid_, 
+                                         TaskReadyAges, RoundRobinToken, tid_, 
                                          task, HasWork, I_, K, L, kq_out, 
                                          current_time, lqbuf, wr, tid, I, 
                                          fildes_, Steps_, fildes, Steps, 
@@ -1349,15 +1552,16 @@ LQ_Flush_To_GQBLoop1(self) == /\ pc[self] = "LQ_Flush_To_GQBLoop1"
                                          /\ pc' = [pc EXCEPT ![self] = "LQ_Flush_To_GQBLoop1_Check_KQ"]
                                     ELSE /\ pc' = [pc EXCEPT ![self] = "LQ_Flush_To_GQB2"]
                                          /\ UNCHANGED << GQB, GQBSize >>
-                              /\ UNCHANGED << GQA, GQAFirst, GQALast, GQLock, 
-                                              LQA, LQAClock, LQASizes, LQB, 
-                                              LQBSizes, LQLocks, TaskIdCurrent, 
-                                              TasksFinished, RTStarted, 
-                                              RTStopped, Futures, FuturePush, 
-                                              FuturesBlocked, FutureWorkers, 
-                                              FDReadsAvailable, 
+                              /\ UNCHANGED << GQA, GQAFirst, GQALast, 
+                                              GQPPPointer, GQLock, LQA, 
+                                              LQAClock, ClkCycles, LQASizes, 
+                                              LQB, LQBSizes, LQLocks, 
+                                              TaskIdCurrent, TasksFinished, 
+                                              RTStarted, RTStopped, Futures, 
+                                              FuturePush, FuturesBlocked, 
+                                              FutureWorkers, FDReadsAvailable, 
                                               FDWritesAvailable, KQueues, 
-                                              KContinueLock, Worker_Wakeup, 
+                                              TaskReadyAges, RoundRobinToken, 
                                               tid_, task, HasWork, I_, J, K, L, 
                                               kq_out, current_time, lqbuf, wr, 
                                               tid, I, fildes_, Steps_, fildes, 
@@ -1370,8 +1574,10 @@ LQ_Flush_To_GQBLoop1_Check_KQ(self) == /\ pc[self] = "LQ_Flush_To_GQBLoop1_Check
                                                   /\ UNCHANGED KQueues
                                        /\ pc' = [pc EXCEPT ![self] = "LQ_Flush_To_GQBLoop1_Add_To_KQ"]
                                        /\ UNCHANGED << GQA, GQAFirst, GQALast, 
-                                                       GQB, GQBSize, GQLock, 
-                                                       LQA, LQAClock, LQASizes, 
+                                                       GQB, GQBSize, 
+                                                       GQPPPointer, GQLock, 
+                                                       LQA, LQAClock, 
+                                                       ClkCycles, LQASizes, 
                                                        LQB, LQBSizes, LQLocks, 
                                                        TaskIdCurrent, 
                                                        TasksFinished, 
@@ -1381,8 +1587,8 @@ LQ_Flush_To_GQBLoop1_Check_KQ(self) == /\ pc[self] = "LQ_Flush_To_GQBLoop1_Check
                                                        FutureWorkers, 
                                                        FDReadsAvailable, 
                                                        FDWritesAvailable, 
-                                                       KContinueLock, 
-                                                       Worker_Wakeup, tid_, 
+                                                       TaskReadyAges, 
+                                                       RoundRobinToken, tid_, 
                                                        task, HasWork, I_, J, K, 
                                                        L, kq_out, current_time, 
                                                        lqbuf, wr, tid, I, 
@@ -1394,10 +1600,11 @@ LQ_Flush_To_GQBLoop1_Add_To_KQ(self) == /\ pc[self] = "LQ_Flush_To_GQBLoop1_Add_
                                         /\ J' = [J EXCEPT ![self] = J[self] + 1]
                                         /\ pc' = [pc EXCEPT ![self] = "LQ_Flush_To_GQBLoop1"]
                                         /\ UNCHANGED << GQA, GQAFirst, GQALast, 
-                                                        GQB, GQBSize, GQLock, 
+                                                        GQB, GQBSize, 
+                                                        GQPPPointer, GQLock, 
                                                         LQA, LQAClock, 
-                                                        LQASizes, LQB, 
-                                                        LQBSizes, LQLocks, 
+                                                        ClkCycles, LQASizes, 
+                                                        LQB, LQBSizes, LQLocks, 
                                                         TaskIdCurrent, 
                                                         TasksFinished, 
                                                         RTStarted, RTStopped, 
@@ -1406,8 +1613,8 @@ LQ_Flush_To_GQBLoop1_Add_To_KQ(self) == /\ pc[self] = "LQ_Flush_To_GQBLoop1_Add_
                                                         FutureWorkers, 
                                                         FDReadsAvailable, 
                                                         FDWritesAvailable, 
-                                                        KContinueLock, 
-                                                        Worker_Wakeup, tid_, 
+                                                        TaskReadyAges, 
+                                                        RoundRobinToken, tid_, 
                                                         task, HasWork, I_, K, 
                                                         L, kq_out, 
                                                         current_time, lqbuf, 
@@ -1419,13 +1626,14 @@ LQ_Flush_To_GQB2(self) == /\ pc[self] = "LQ_Flush_To_GQB2"
                           /\ J' = [J EXCEPT ![self] = 1]
                           /\ pc' = [pc EXCEPT ![self] = "LQ_Flush_To_GQBLoop2"]
                           /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
-                                          GQLock, LQA, LQAClock, LQASizes, LQB, 
-                                          LQBSizes, LQLocks, TaskIdCurrent, 
+                                          GQPPPointer, GQLock, LQA, LQAClock, 
+                                          ClkCycles, LQASizes, LQB, LQBSizes, 
+                                          LQLocks, TaskIdCurrent, 
                                           TasksFinished, RTStarted, RTStopped, 
                                           Futures, FuturePush, FuturesBlocked, 
                                           FutureWorkers, FDReadsAvailable, 
                                           FDWritesAvailable, KQueues, 
-                                          KContinueLock, Worker_Wakeup, tid_, 
+                                          TaskReadyAges, RoundRobinToken, tid_, 
                                           task, HasWork, I_, K, L, kq_out, 
                                           current_time, lqbuf, wr, tid, I, 
                                           fildes_, Steps_, fildes, Steps, 
@@ -1443,14 +1651,15 @@ LQ_Flush_To_GQBLoop2(self) == /\ pc[self] = "LQ_Flush_To_GQBLoop2"
                                          /\ pc' = [pc EXCEPT ![self] = "Flush_To_LQB_Continuation"]
                                          /\ UNCHANGED KQueues
                               /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, 
-                                              GQBSize, GQLock, LQA, LQAClock, 
+                                              GQBSize, GQPPPointer, GQLock, 
+                                              LQA, LQAClock, ClkCycles, 
                                               LQASizes, LQB, LQLocks, 
                                               TaskIdCurrent, TasksFinished, 
                                               RTStarted, RTStopped, Futures, 
                                               FuturePush, FuturesBlocked, 
                                               FutureWorkers, FDReadsAvailable, 
-                                              FDWritesAvailable, KContinueLock, 
-                                              Worker_Wakeup, tid_, task, 
+                                              FDWritesAvailable, TaskReadyAges, 
+                                              RoundRobinToken, tid_, task, 
                                               HasWork, I_, J, K, L, kq_out, 
                                               current_time, lqbuf, wr, tid, I, 
                                               fildes_, Steps_, fildes, Steps, 
@@ -1465,9 +1674,11 @@ LQ_Flush_To_GQBLoop2AfterCheckContinuation(self) == /\ pc[self] = "LQ_Flush_To_G
                                                                     GQALast, 
                                                                     GQB, 
                                                                     GQBSize, 
+                                                                    GQPPPointer, 
                                                                     GQLock, 
                                                                     LQA, 
                                                                     LQAClock, 
+                                                                    ClkCycles, 
                                                                     LQASizes, 
                                                                     LQBSizes, 
                                                                     LQLocks, 
@@ -1482,8 +1693,8 @@ LQ_Flush_To_GQBLoop2AfterCheckContinuation(self) == /\ pc[self] = "LQ_Flush_To_G
                                                                     FDReadsAvailable, 
                                                                     FDWritesAvailable, 
                                                                     KQueues, 
-                                                                    KContinueLock, 
-                                                                    Worker_Wakeup, 
+                                                                    TaskReadyAges, 
+                                                                    RoundRobinToken, 
                                                                     tid_, task, 
                                                                     HasWork, 
                                                                     I_, K, L, 
@@ -1501,30 +1712,485 @@ LQ_Flush_Step(self) == /\ pc[self] = "LQ_Flush_Step"
                        /\ I_' = [I_ EXCEPT ![self] = I_[self] + 1]
                        /\ pc' = [pc EXCEPT ![self] = "LQ_Flush_Loop"]
                        /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
-                                       GQLock, LQA, LQAClock, LQASizes, LQB, 
-                                       LQBSizes, LQLocks, TaskIdCurrent, 
-                                       TasksFinished, RTStarted, RTStopped, 
-                                       Futures, FuturePush, FuturesBlocked, 
+                                       GQPPPointer, GQLock, LQA, LQAClock, 
+                                       ClkCycles, LQASizes, LQB, LQBSizes, 
+                                       LQLocks, TaskIdCurrent, TasksFinished, 
+                                       RTStarted, RTStopped, Futures, 
+                                       FuturePush, FuturesBlocked, 
                                        FutureWorkers, FDReadsAvailable, 
                                        FDWritesAvailable, KQueues, 
-                                       KContinueLock, Worker_Wakeup, tid_, 
+                                       TaskReadyAges, RoundRobinToken, tid_, 
                                        task, HasWork, J, K, L, kq_out, 
                                        current_time, lqbuf, wr, tid, I, 
                                        fildes_, Steps_, fildes, Steps, 
                                        PolledRead >>
 
+LQ_GQ_CheckPushPull(self) == /\ pc[self] = "LQ_GQ_CheckPushPull"
+                             /\ ClkCycles' = [ClkCycles EXCEPT ![self] = ClkCycles[self] + 1]
+                             /\ IF ClkCycles'[self] = NumClockCyclesBeforeGQPushPull
+                                   THEN /\ pc' = [pc EXCEPT ![self] = "Begin_LQ_GQ_PushPull"]
+                                   ELSE /\ pc' = [pc EXCEPT ![self] = "LQ_Poll_KQ"]
+                             /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, 
+                                             GQBSize, GQPPPointer, GQLock, LQA, 
+                                             LQAClock, LQASizes, LQB, LQBSizes, 
+                                             LQLocks, TaskIdCurrent, 
+                                             TasksFinished, RTStarted, 
+                                             RTStopped, Futures, FuturePush, 
+                                             FuturesBlocked, FutureWorkers, 
+                                             FDReadsAvailable, 
+                                             FDWritesAvailable, KQueues, 
+                                             TaskReadyAges, RoundRobinToken, 
+                                             tid_, task, HasWork, I_, J, K, L, 
+                                             kq_out, current_time, lqbuf, wr, 
+                                             tid, I, fildes_, Steps_, fildes, 
+                                             Steps, PolledRead >>
+
+Begin_LQ_GQ_PushPull(self) == /\ pc[self] = "Begin_LQ_GQ_PushPull"
+                              /\ ClkCycles' = [ClkCycles EXCEPT ![self] = 0]
+                              /\ pc' = [pc EXCEPT ![self] = "AttemptEnqueueFromGlobalLockGQ2"]
+                              /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, 
+                                              GQBSize, GQPPPointer, GQLock, 
+                                              LQA, LQAClock, LQASizes, LQB, 
+                                              LQBSizes, LQLocks, TaskIdCurrent, 
+                                              TasksFinished, RTStarted, 
+                                              RTStopped, Futures, FuturePush, 
+                                              FuturesBlocked, FutureWorkers, 
+                                              FDReadsAvailable, 
+                                              FDWritesAvailable, KQueues, 
+                                              TaskReadyAges, RoundRobinToken, 
+                                              tid_, task, HasWork, I_, J, K, L, 
+                                              kq_out, current_time, lqbuf, wr, 
+                                              tid, I, fildes_, Steps_, fildes, 
+                                              Steps, PolledRead >>
+
+AttemptEnqueueFromGlobalLockGQ2(self) == /\ pc[self] = "AttemptEnqueueFromGlobalLockGQ2"
+                                         /\ GQLock = NullLock
+                                         /\ GQLock' = self
+                                         /\ pc' = [pc EXCEPT ![self] = "GQ_Poll_Check_KQ2"]
+                                         /\ UNCHANGED << GQA, GQAFirst, 
+                                                         GQALast, GQB, GQBSize, 
+                                                         GQPPPointer, LQA, 
+                                                         LQAClock, ClkCycles, 
+                                                         LQASizes, LQB, 
+                                                         LQBSizes, LQLocks, 
+                                                         TaskIdCurrent, 
+                                                         TasksFinished, 
+                                                         RTStarted, RTStopped, 
+                                                         Futures, FuturePush, 
+                                                         FuturesBlocked, 
+                                                         FutureWorkers, 
+                                                         FDReadsAvailable, 
+                                                         FDWritesAvailable, 
+                                                         KQueues, 
+                                                         TaskReadyAges, 
+                                                         RoundRobinToken, tid_, 
+                                                         task, HasWork, I_, J, 
+                                                         K, L, kq_out, 
+                                                         current_time, lqbuf, 
+                                                         wr, tid, I, fildes_, 
+                                                         Steps_, fildes, Steps, 
+                                                         PolledRead >>
+
+GQ_Poll_Check_KQ2(self) == /\ pc[self] = "GQ_Poll_Check_KQ2"
+                           /\ IF KQueues[0] = NullKQ
+                                 THEN /\ pc' = [pc EXCEPT ![self] = "GQ_Flush_Ready_Begin2"]
+                                 ELSE /\ pc' = [pc EXCEPT ![self] = "GQ_Poll_KQ_Begin2"]
+                           /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, 
+                                           GQBSize, GQPPPointer, GQLock, LQA, 
+                                           LQAClock, ClkCycles, LQASizes, LQB, 
+                                           LQBSizes, LQLocks, TaskIdCurrent, 
+                                           TasksFinished, RTStarted, RTStopped, 
+                                           Futures, FuturePush, FuturesBlocked, 
+                                           FutureWorkers, FDReadsAvailable, 
+                                           FDWritesAvailable, KQueues, 
+                                           TaskReadyAges, RoundRobinToken, 
+                                           tid_, task, HasWork, I_, J, K, L, 
+                                           kq_out, current_time, lqbuf, wr, 
+                                           tid, I, fildes_, Steps_, fildes, 
+                                           Steps, PolledRead >>
+
+GQ_Poll_KQ_Begin2(self) == /\ pc[self] = "GQ_Poll_KQ_Begin2"
+                           /\ kq_out' = [kq_out EXCEPT ![self] = SubSeq(KQueues[0].available, 1, MinNum(KQPollNum, Len(KQueues[0].available)))]
+                           /\ KQueues' = [KQueues EXCEPT ![0].available = IF KQPollNum < Len(KQueues[0].available)
+                                                                          THEN SubSeq(KQueues[0].available, KQPollNum + 1, Len(KQueues[0].available))
+                                                                          ELSE ESeq]
+                           /\ pc' = [pc EXCEPT ![self] = "GQ_Update_Ready2"]
+                           /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, 
+                                           GQBSize, GQPPPointer, GQLock, LQA, 
+                                           LQAClock, ClkCycles, LQASizes, LQB, 
+                                           LQBSizes, LQLocks, TaskIdCurrent, 
+                                           TasksFinished, RTStarted, RTStopped, 
+                                           Futures, FuturePush, FuturesBlocked, 
+                                           FutureWorkers, FDReadsAvailable, 
+                                           FDWritesAvailable, TaskReadyAges, 
+                                           RoundRobinToken, tid_, task, 
+                                           HasWork, I_, J, K, L, current_time, 
+                                           lqbuf, wr, tid, I, fildes_, Steps_, 
+                                           fildes, Steps, PolledRead >>
+
+GQ_Update_Ready2(self) == /\ pc[self] = "GQ_Update_Ready2"
+                          /\ GQB' =    [i \in GQ |->
+                                    IF i \in 1..GQBSize /\ \E x \in DOMAIN kq_out[self]: GQB[self][i].t_id = kq_out[self][x].t_id THEN
+                                        LET x == CHOOSE x \in DOMAIN kq_out[self]: kq_out[self][x].t_id = LQB[i].t_id
+                                        IN
+                                            [LQB[i] EXCEPT
+                                                !.state = TSReady,
+                                                !.blocked_io_info.data = kq_out[self][x].data,
+                                                !.blocked_io_info.eof = kq_out[self][x].eof
+                                            ]
+                                    ELSE GQB[i]]
+                          /\ pc' = [pc EXCEPT ![self] = "GQ_Flush_Ready_Begin2"]
+                          /\ UNCHANGED << GQA, GQAFirst, GQALast, GQBSize, 
+                                          GQPPPointer, GQLock, LQA, LQAClock, 
+                                          ClkCycles, LQASizes, LQB, LQBSizes, 
+                                          LQLocks, TaskIdCurrent, 
+                                          TasksFinished, RTStarted, RTStopped, 
+                                          Futures, FuturePush, FuturesBlocked, 
+                                          FutureWorkers, FDReadsAvailable, 
+                                          FDWritesAvailable, KQueues, 
+                                          TaskReadyAges, RoundRobinToken, tid_, 
+                                          task, HasWork, I_, J, K, L, kq_out, 
+                                          current_time, lqbuf, wr, tid, I, 
+                                          fildes_, Steps_, fildes, Steps, 
+                                          PolledRead >>
+
+GQ_Flush_Ready_Begin2(self) == /\ pc[self] = "GQ_Flush_Ready_Begin2"
+                               /\ I_' = [I_ EXCEPT ![self] = 1]
+                               /\ K' = [K EXCEPT ![self] = 0]
+                               /\ pc' = [pc EXCEPT ![self] = "GQ_Flush_Ready2"]
+                               /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, 
+                                               GQBSize, GQPPPointer, GQLock, 
+                                               LQA, LQAClock, ClkCycles, 
+                                               LQASizes, LQB, LQBSizes, 
+                                               LQLocks, TaskIdCurrent, 
+                                               TasksFinished, RTStarted, 
+                                               RTStopped, Futures, FuturePush, 
+                                               FuturesBlocked, FutureWorkers, 
+                                               FDReadsAvailable, 
+                                               FDWritesAvailable, KQueues, 
+                                               TaskReadyAges, RoundRobinToken, 
+                                               tid_, task, HasWork, J, L, 
+                                               kq_out, current_time, lqbuf, wr, 
+                                               tid, I, fildes_, Steps_, fildes, 
+                                               Steps, PolledRead >>
+
+GQ_Flush_Ready2(self) == /\ pc[self] = "GQ_Flush_Ready2"
+                         /\ IF I_[self] <= GQBSize
+                               THEN /\ pc' = [pc EXCEPT ![self] = "GQ_Flush_Check_Timer2"]
+                               ELSE /\ pc' = [pc EXCEPT ![self] = "GQ_Flush_Ready_Done2"]
+                         /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
+                                         GQPPPointer, GQLock, LQA, LQAClock, 
+                                         ClkCycles, LQASizes, LQB, LQBSizes, 
+                                         LQLocks, TaskIdCurrent, TasksFinished, 
+                                         RTStarted, RTStopped, Futures, 
+                                         FuturePush, FuturesBlocked, 
+                                         FutureWorkers, FDReadsAvailable, 
+                                         FDWritesAvailable, KQueues, 
+                                         TaskReadyAges, RoundRobinToken, tid_, 
+                                         task, HasWork, I_, J, K, L, kq_out, 
+                                         current_time, lqbuf, wr, tid, I, 
+                                         fildes_, Steps_, fildes, Steps, 
+                                         PolledRead >>
+
+GQ_Flush_Check_Timer2(self) == /\ pc[self] = "GQ_Flush_Check_Timer2"
+                               /\ IF GQB[I_[self]].state = TSBTimer
+                                     THEN /\ \/ /\ GQB' = [GQB EXCEPT ![I_[self]].state = TSReady]
+                                             \/ /\ TRUE
+                                                /\ GQB' = GQB
+                                     ELSE /\ TRUE
+                                          /\ GQB' = GQB
+                               /\ pc' = [pc EXCEPT ![self] = "GQ_Flush_Ready_Check_Ready2"]
+                               /\ UNCHANGED << GQA, GQAFirst, GQALast, GQBSize, 
+                                               GQPPPointer, GQLock, LQA, 
+                                               LQAClock, ClkCycles, LQASizes, 
+                                               LQB, LQBSizes, LQLocks, 
+                                               TaskIdCurrent, TasksFinished, 
+                                               RTStarted, RTStopped, Futures, 
+                                               FuturePush, FuturesBlocked, 
+                                               FutureWorkers, FDReadsAvailable, 
+                                               FDWritesAvailable, KQueues, 
+                                               TaskReadyAges, RoundRobinToken, 
+                                               tid_, task, HasWork, I_, J, K, 
+                                               L, kq_out, current_time, lqbuf, 
+                                               wr, tid, I, fildes_, Steps_, 
+                                               fildes, Steps, PolledRead >>
+
+GQ_Flush_Ready_Check_Ready2(self) == /\ pc[self] = "GQ_Flush_Ready_Check_Ready2"
+                                     /\ IF GQB[I_[self]].state = TSReady
+                                           THEN /\ GQALast' = GQALast + 1
+                                                /\ GQA' = [GQA EXCEPT ![((GQALast' - 1) % GQSize) + 1] = GQB[I_[self]]]
+                                                /\ TaskReadyAges' = [TaskReadyAges EXCEPT ![GQB[I_[self]].t_id] = 0]
+                                                /\ UNCHANGED << GQB, K >>
+                                           ELSE /\ K' = [K EXCEPT ![self] = K[self] + 1]
+                                                /\ GQB' = [GQB EXCEPT ![K'[self]] = GQB[I_[self]]]
+                                                /\ UNCHANGED << GQA, GQALast, 
+                                                                TaskReadyAges >>
+                                     /\ pc' = [pc EXCEPT ![self] = "GQ_Flush_Ready_Step2"]
+                                     /\ UNCHANGED << GQAFirst, GQBSize, 
+                                                     GQPPPointer, GQLock, LQA, 
+                                                     LQAClock, ClkCycles, 
+                                                     LQASizes, LQB, LQBSizes, 
+                                                     LQLocks, TaskIdCurrent, 
+                                                     TasksFinished, RTStarted, 
+                                                     RTStopped, Futures, 
+                                                     FuturePush, 
+                                                     FuturesBlocked, 
+                                                     FutureWorkers, 
+                                                     FDReadsAvailable, 
+                                                     FDWritesAvailable, 
+                                                     KQueues, RoundRobinToken, 
+                                                     tid_, task, HasWork, I_, 
+                                                     J, L, kq_out, 
+                                                     current_time, lqbuf, wr, 
+                                                     tid, I, fildes_, Steps_, 
+                                                     fildes, Steps, PolledRead >>
+
+GQ_Flush_Ready_Step2(self) == /\ pc[self] = "GQ_Flush_Ready_Step2"
+                              /\ I_' = [I_ EXCEPT ![self] = I_[self] + 1]
+                              /\ pc' = [pc EXCEPT ![self] = "GQ_Flush_Ready2"]
+                              /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, 
+                                              GQBSize, GQPPPointer, GQLock, 
+                                              LQA, LQAClock, ClkCycles, 
+                                              LQASizes, LQB, LQBSizes, LQLocks, 
+                                              TaskIdCurrent, TasksFinished, 
+                                              RTStarted, RTStopped, Futures, 
+                                              FuturePush, FuturesBlocked, 
+                                              FutureWorkers, FDReadsAvailable, 
+                                              FDWritesAvailable, KQueues, 
+                                              TaskReadyAges, RoundRobinToken, 
+                                              tid_, task, HasWork, J, K, L, 
+                                              kq_out, current_time, lqbuf, wr, 
+                                              tid, I, fildes_, Steps_, fildes, 
+                                              Steps, PolledRead >>
+
+GQ_Flush_Ready_Done2(self) == /\ pc[self] = "GQ_Flush_Ready_Done2"
+                              /\ GQBSize' = K[self]
+                              /\ I_' = [I_ EXCEPT ![self] = GQAFirst + 1]
+                              /\ K' = [K EXCEPT ![self] = 0]
+                              /\ pc' = [pc EXCEPT ![self] = "AttemptEnqueueFromGlobalWhile2"]
+                              /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, 
+                                              GQPPPointer, GQLock, LQA, 
+                                              LQAClock, ClkCycles, LQASizes, 
+                                              LQB, LQBSizes, LQLocks, 
+                                              TaskIdCurrent, TasksFinished, 
+                                              RTStarted, RTStopped, Futures, 
+                                              FuturePush, FuturesBlocked, 
+                                              FutureWorkers, FDReadsAvailable, 
+                                              FDWritesAvailable, KQueues, 
+                                              TaskReadyAges, RoundRobinToken, 
+                                              tid_, task, HasWork, J, L, 
+                                              kq_out, current_time, lqbuf, wr, 
+                                              tid, I, fildes_, Steps_, fildes, 
+                                              Steps, PolledRead >>
+
+AttemptEnqueueFromGlobalWhile2(self) == /\ pc[self] = "AttemptEnqueueFromGlobalWhile2"
+                                        /\ IF I_[self] <= GQALast /\ K[self] < (LQSize \div 2)
+                                              THEN /\ K' = [K EXCEPT ![self] = K[self] + 1]
+                                                   /\ LQA' = [LQA EXCEPT ![self][K'[self]] = GQA[I_[self]]]
+                                                   /\ I_' = [I_ EXCEPT ![self] = I_[self] + 1]
+                                                   /\ pc' = [pc EXCEPT ![self] = "AttemptEnqueueFromGlobalWhile2"]
+                                              ELSE /\ pc' = [pc EXCEPT ![self] = "UpdateGQAPointers2"]
+                                                   /\ UNCHANGED << LQA, I_, K >>
+                                        /\ UNCHANGED << GQA, GQAFirst, GQALast, 
+                                                        GQB, GQBSize, 
+                                                        GQPPPointer, GQLock, 
+                                                        LQAClock, ClkCycles, 
+                                                        LQASizes, LQB, 
+                                                        LQBSizes, LQLocks, 
+                                                        TaskIdCurrent, 
+                                                        TasksFinished, 
+                                                        RTStarted, RTStopped, 
+                                                        Futures, FuturePush, 
+                                                        FuturesBlocked, 
+                                                        FutureWorkers, 
+                                                        FDReadsAvailable, 
+                                                        FDWritesAvailable, 
+                                                        KQueues, TaskReadyAges, 
+                                                        RoundRobinToken, tid_, 
+                                                        task, HasWork, J, L, 
+                                                        kq_out, current_time, 
+                                                        lqbuf, wr, tid, I, 
+                                                        fildes_, Steps_, 
+                                                        fildes, Steps, 
+                                                        PolledRead >>
+
+UpdateGQAPointers2(self) == /\ pc[self] = "UpdateGQAPointers2"
+                            /\ GQAFirst' = I_[self] - 1
+                            /\ pc' = [pc EXCEPT ![self] = "UpdateGQAPointersCheck2"]
+                            /\ UNCHANGED << GQA, GQALast, GQB, GQBSize, 
+                                            GQPPPointer, GQLock, LQA, LQAClock, 
+                                            ClkCycles, LQASizes, LQB, LQBSizes, 
+                                            LQLocks, TaskIdCurrent, 
+                                            TasksFinished, RTStarted, 
+                                            RTStopped, Futures, FuturePush, 
+                                            FuturesBlocked, FutureWorkers, 
+                                            FDReadsAvailable, 
+                                            FDWritesAvailable, KQueues, 
+                                            TaskReadyAges, RoundRobinToken, 
+                                            tid_, task, HasWork, I_, J, K, L, 
+                                            kq_out, current_time, lqbuf, wr, 
+                                            tid, I, fildes_, Steps_, fildes, 
+                                            Steps, PolledRead >>
+
+UpdateGQAPointersCheck2(self) == /\ pc[self] = "UpdateGQAPointersCheck2"
+                                 /\ IF GQAFirst > GQSize
+                                       THEN /\ GQAFirst' = GQAFirst - GQSize
+                                            /\ GQALast' = GQALast - GQSize
+                                            /\ GQPPPointer' = GQPPPointer - GQSize
+                                       ELSE /\ TRUE
+                                            /\ UNCHANGED << GQAFirst, GQALast, 
+                                                            GQPPPointer >>
+                                 /\ pc' = [pc EXCEPT ![self] = "PushPullBegin"]
+                                 /\ UNCHANGED << GQA, GQB, GQBSize, GQLock, 
+                                                 LQA, LQAClock, ClkCycles, 
+                                                 LQASizes, LQB, LQBSizes, 
+                                                 LQLocks, TaskIdCurrent, 
+                                                 TasksFinished, RTStarted, 
+                                                 RTStopped, Futures, 
+                                                 FuturePush, FuturesBlocked, 
+                                                 FutureWorkers, 
+                                                 FDReadsAvailable, 
+                                                 FDWritesAvailable, KQueues, 
+                                                 TaskReadyAges, 
+                                                 RoundRobinToken, tid_, task, 
+                                                 HasWork, I_, J, K, L, kq_out, 
+                                                 current_time, lqbuf, wr, tid, 
+                                                 I, fildes_, Steps_, fildes, 
+                                                 Steps, PolledRead >>
+
+PushPullBegin(self) == /\ pc[self] = "PushPullBegin"
+                       /\ GQPPPointer' = (IF GQPPPointer <= GQAFirst THEN GQAFirst + 1 ELSE GQPPPointer + 1)
+                       /\ I_' = [I_ EXCEPT ![self] = GQPPPointer']
+                       /\ K' = [K EXCEPT ![self] = 1]
+                       /\ pc' = [pc EXCEPT ![self] = "PerformFirstPushPull"]
+                       /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
+                                       GQLock, LQA, LQAClock, ClkCycles, 
+                                       LQASizes, LQB, LQBSizes, LQLocks, 
+                                       TaskIdCurrent, TasksFinished, RTStarted, 
+                                       RTStopped, Futures, FuturePush, 
+                                       FuturesBlocked, FutureWorkers, 
+                                       FDReadsAvailable, FDWritesAvailable, 
+                                       KQueues, TaskReadyAges, RoundRobinToken, 
+                                       tid_, task, HasWork, J, L, kq_out, 
+                                       current_time, lqbuf, wr, tid, I, 
+                                       fildes_, Steps_, fildes, Steps, 
+                                       PolledRead >>
+
+PerformFirstPushPull(self) == /\ pc[self] = "PerformFirstPushPull"
+                              /\ IF GQPPPointer <= GQALast /\ K[self] <= LQASizes[self]
+                                    THEN /\ task' = [task EXCEPT ![self] = LQA[K[self]]]
+                                         /\ LQA' = [LQA EXCEPT ![K[self]] = GQA[((GQPPPointer - 1) % GQ) + 1]]
+                                         /\ GQA' = [GQA EXCEPT ![((GQPPPointer - 1) % GQ) + 1] = task'[self]]
+                                         /\ GQPPPointer' = (IF GQPPPointer < GQALast THEN GQPPPointer + 1 ELSE GQAFirst + 1)
+                                         /\ K' = [K EXCEPT ![self] = K[self] + 1]
+                                         /\ pc' = [pc EXCEPT ![self] = "PushPull"]
+                                    ELSE /\ pc' = [pc EXCEPT ![self] = "AttemptEnqueueFromGlobalFinish2"]
+                                         /\ UNCHANGED << GQA, GQPPPointer, LQA, 
+                                                         task, K >>
+                              /\ UNCHANGED << GQAFirst, GQALast, GQB, GQBSize, 
+                                              GQLock, LQAClock, ClkCycles, 
+                                              LQASizes, LQB, LQBSizes, LQLocks, 
+                                              TaskIdCurrent, TasksFinished, 
+                                              RTStarted, RTStopped, Futures, 
+                                              FuturePush, FuturesBlocked, 
+                                              FutureWorkers, FDReadsAvailable, 
+                                              FDWritesAvailable, KQueues, 
+                                              TaskReadyAges, RoundRobinToken, 
+                                              tid_, HasWork, I_, J, L, kq_out, 
+                                              current_time, lqbuf, wr, tid, I, 
+                                              fildes_, Steps_, fildes, Steps, 
+                                              PolledRead >>
+
+PushPull(self) == /\ pc[self] = "PushPull"
+                  /\ IF GQPPPointer # I_[self] /\ K[self] <= LQASizes[self]
+                        THEN /\ pc' = [pc EXCEPT ![self] = "PerformPushPull"]
+                        ELSE /\ pc' = [pc EXCEPT ![self] = "AttemptEnqueueFromGlobalFinish2"]
+                  /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
+                                  GQPPPointer, GQLock, LQA, LQAClock, 
+                                  ClkCycles, LQASizes, LQB, LQBSizes, LQLocks, 
+                                  TaskIdCurrent, TasksFinished, RTStarted, 
+                                  RTStopped, Futures, FuturePush, 
+                                  FuturesBlocked, FutureWorkers, 
+                                  FDReadsAvailable, FDWritesAvailable, KQueues, 
+                                  TaskReadyAges, RoundRobinToken, tid_, task, 
+                                  HasWork, I_, J, K, L, kq_out, current_time, 
+                                  lqbuf, wr, tid, I, fildes_, Steps_, fildes, 
+                                  Steps, PolledRead >>
+
+PerformPushPull(self) == /\ pc[self] = "PerformPushPull"
+                         /\ task' = [task EXCEPT ![self] = LQA[K[self]]]
+                         /\ LQA' = [LQA EXCEPT ![K[self]] = GQA[((GQPPPointer - 1) % GQ) + 1]]
+                         /\ GQA' = [GQA EXCEPT ![((GQPPPointer - 1) % GQ) + 1] = task'[self]]
+                         /\ pc' = [pc EXCEPT ![self] = "PushPullStep"]
+                         /\ UNCHANGED << GQAFirst, GQALast, GQB, GQBSize, 
+                                         GQPPPointer, GQLock, LQAClock, 
+                                         ClkCycles, LQASizes, LQB, LQBSizes, 
+                                         LQLocks, TaskIdCurrent, TasksFinished, 
+                                         RTStarted, RTStopped, Futures, 
+                                         FuturePush, FuturesBlocked, 
+                                         FutureWorkers, FDReadsAvailable, 
+                                         FDWritesAvailable, KQueues, 
+                                         TaskReadyAges, RoundRobinToken, tid_, 
+                                         HasWork, I_, J, K, L, kq_out, 
+                                         current_time, lqbuf, wr, tid, I, 
+                                         fildes_, Steps_, fildes, Steps, 
+                                         PolledRead >>
+
+PushPullStep(self) == /\ pc[self] = "PushPullStep"
+                      /\ GQPPPointer' = (IF GQPPPointer < GQALast THEN GQPPPointer + 1 ELSE GQAFirst + 1)
+                      /\ K' = [K EXCEPT ![self] = K[self] + 1]
+                      /\ pc' = [pc EXCEPT ![self] = "PushPull"]
+                      /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
+                                      GQLock, LQA, LQAClock, ClkCycles, 
+                                      LQASizes, LQB, LQBSizes, LQLocks, 
+                                      TaskIdCurrent, TasksFinished, RTStarted, 
+                                      RTStopped, Futures, FuturePush, 
+                                      FuturesBlocked, FutureWorkers, 
+                                      FDReadsAvailable, FDWritesAvailable, 
+                                      KQueues, TaskReadyAges, RoundRobinToken, 
+                                      tid_, task, HasWork, I_, J, L, kq_out, 
+                                      current_time, lqbuf, wr, tid, I, fildes_, 
+                                      Steps_, fildes, Steps, PolledRead >>
+
+AttemptEnqueueFromGlobalFinish2(self) == /\ pc[self] = "AttemptEnqueueFromGlobalFinish2"
+                                         /\ GQLock' = NullLock
+                                         /\ pc' = [pc EXCEPT ![self] = "LQ_Poll_KQ"]
+                                         /\ UNCHANGED << GQA, GQAFirst, 
+                                                         GQALast, GQB, GQBSize, 
+                                                         GQPPPointer, LQA, 
+                                                         LQAClock, ClkCycles, 
+                                                         LQASizes, LQB, 
+                                                         LQBSizes, LQLocks, 
+                                                         TaskIdCurrent, 
+                                                         TasksFinished, 
+                                                         RTStarted, RTStopped, 
+                                                         Futures, FuturePush, 
+                                                         FuturesBlocked, 
+                                                         FutureWorkers, 
+                                                         FDReadsAvailable, 
+                                                         FDWritesAvailable, 
+                                                         KQueues, 
+                                                         TaskReadyAges, 
+                                                         RoundRobinToken, tid_, 
+                                                         task, HasWork, I_, J, 
+                                                         K, L, kq_out, 
+                                                         current_time, lqbuf, 
+                                                         wr, tid, I, fildes_, 
+                                                         Steps_, fildes, Steps, 
+                                                         PolledRead >>
+
 LQ_Poll_KQ(self) == /\ pc[self] = "LQ_Poll_KQ"
-                    /\ LQASizes' = [LQASizes EXCEPT ![self] = K[self]]
                     /\ IF KQueues[self] # NullKQ
                           THEN /\ pc' = [pc EXCEPT ![self] = "LQ_Poll_KQ_Begin"]
-                          ELSE /\ pc' = [pc EXCEPT ![self] = "LQ_Reset_Clock"]
+                          ELSE /\ pc' = [pc EXCEPT ![self] = "Flush_Ready_Begin"]
                     /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
-                                    GQLock, LQA, LQAClock, LQB, LQBSizes, 
+                                    GQPPPointer, GQLock, LQA, LQAClock, 
+                                    ClkCycles, LQASizes, LQB, LQBSizes, 
                                     LQLocks, TaskIdCurrent, TasksFinished, 
                                     RTStarted, RTStopped, Futures, FuturePush, 
                                     FuturesBlocked, FutureWorkers, 
                                     FDReadsAvailable, FDWritesAvailable, 
-                                    KQueues, KContinueLock, Worker_Wakeup, 
+                                    KQueues, TaskReadyAges, RoundRobinToken, 
                                     tid_, task, HasWork, I_, J, K, L, kq_out, 
                                     current_time, lqbuf, wr, tid, I, fildes_, 
                                     Steps_, fildes, Steps, PolledRead >>
@@ -1536,13 +2202,14 @@ LQ_Poll_KQ_Begin(self) == /\ pc[self] = "LQ_Poll_KQ_Begin"
                                                                             ELSE ESeq]
                           /\ pc' = [pc EXCEPT ![self] = "Update_Ready"]
                           /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
-                                          GQLock, LQA, LQAClock, LQASizes, LQB, 
-                                          LQBSizes, LQLocks, TaskIdCurrent, 
+                                          GQPPPointer, GQLock, LQA, LQAClock, 
+                                          ClkCycles, LQASizes, LQB, LQBSizes, 
+                                          LQLocks, TaskIdCurrent, 
                                           TasksFinished, RTStarted, RTStopped, 
                                           Futures, FuturePush, FuturesBlocked, 
                                           FutureWorkers, FDReadsAvailable, 
-                                          FDWritesAvailable, KContinueLock, 
-                                          Worker_Wakeup, tid_, task, HasWork, 
+                                          FDWritesAvailable, TaskReadyAges, 
+                                          RoundRobinToken, tid_, task, HasWork, 
                                           I_, J, K, L, current_time, lqbuf, wr, 
                                           tid, I, fildes_, Steps_, fildes, 
                                           Steps, PolledRead >>
@@ -1558,36 +2225,52 @@ Update_Ready(self) == /\ pc[self] = "Update_Ready"
                                                                   !.blocked_io_info.eof = kq_out[self][x].eof
                                                               ]
                                                       ELSE LQB[self][i]]]
-                      /\ I_' = [I_ EXCEPT ![self] = 1]
-                      /\ K' = [K EXCEPT ![self] = 0]
-                      /\ pc' = [pc EXCEPT ![self] = "Flush_Ready"]
+                      /\ pc' = [pc EXCEPT ![self] = "Flush_Ready_Begin"]
                       /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
-                                      GQLock, LQA, LQAClock, LQASizes, 
-                                      LQBSizes, LQLocks, TaskIdCurrent, 
-                                      TasksFinished, RTStarted, RTStopped, 
-                                      Futures, FuturePush, FuturesBlocked, 
-                                      FutureWorkers, FDReadsAvailable, 
-                                      FDWritesAvailable, KQueues, 
-                                      KContinueLock, Worker_Wakeup, tid_, task, 
-                                      HasWork, J, L, kq_out, current_time, 
-                                      lqbuf, wr, tid, I, fildes_, Steps_, 
-                                      fildes, Steps, PolledRead >>
+                                      GQPPPointer, GQLock, LQA, LQAClock, 
+                                      ClkCycles, LQASizes, LQBSizes, LQLocks, 
+                                      TaskIdCurrent, TasksFinished, RTStarted, 
+                                      RTStopped, Futures, FuturePush, 
+                                      FuturesBlocked, FutureWorkers, 
+                                      FDReadsAvailable, FDWritesAvailable, 
+                                      KQueues, TaskReadyAges, RoundRobinToken, 
+                                      tid_, task, HasWork, I_, J, K, L, kq_out, 
+                                      current_time, lqbuf, wr, tid, I, fildes_, 
+                                      Steps_, fildes, Steps, PolledRead >>
+
+Flush_Ready_Begin(self) == /\ pc[self] = "Flush_Ready_Begin"
+                           /\ I_' = [I_ EXCEPT ![self] = 1]
+                           /\ K' = [K EXCEPT ![self] = 0]
+                           /\ pc' = [pc EXCEPT ![self] = "Flush_Ready"]
+                           /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, 
+                                           GQBSize, GQPPPointer, GQLock, LQA, 
+                                           LQAClock, ClkCycles, LQASizes, LQB, 
+                                           LQBSizes, LQLocks, TaskIdCurrent, 
+                                           TasksFinished, RTStarted, RTStopped, 
+                                           Futures, FuturePush, FuturesBlocked, 
+                                           FutureWorkers, FDReadsAvailable, 
+                                           FDWritesAvailable, KQueues, 
+                                           TaskReadyAges, RoundRobinToken, 
+                                           tid_, task, HasWork, J, L, kq_out, 
+                                           current_time, lqbuf, wr, tid, I, 
+                                           fildes_, Steps_, fildes, Steps, 
+                                           PolledRead >>
 
 Flush_Ready(self) == /\ pc[self] = "Flush_Ready"
                      /\ IF I_[self] <= LQBSizes[self]
                            THEN /\ pc' = [pc EXCEPT ![self] = "Flush_Check_Timer"]
                            ELSE /\ pc' = [pc EXCEPT ![self] = "Flush_Ready_Done"]
                      /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
-                                     GQLock, LQA, LQAClock, LQASizes, LQB, 
-                                     LQBSizes, LQLocks, TaskIdCurrent, 
-                                     TasksFinished, RTStarted, RTStopped, 
-                                     Futures, FuturePush, FuturesBlocked, 
-                                     FutureWorkers, FDReadsAvailable, 
-                                     FDWritesAvailable, KQueues, KContinueLock, 
-                                     Worker_Wakeup, tid_, task, HasWork, I_, J, 
-                                     K, L, kq_out, current_time, lqbuf, wr, 
-                                     tid, I, fildes_, Steps_, fildes, Steps, 
-                                     PolledRead >>
+                                     GQPPPointer, GQLock, LQA, LQAClock, 
+                                     ClkCycles, LQASizes, LQB, LQBSizes, 
+                                     LQLocks, TaskIdCurrent, TasksFinished, 
+                                     RTStarted, RTStopped, Futures, FuturePush, 
+                                     FuturesBlocked, FutureWorkers, 
+                                     FDReadsAvailable, FDWritesAvailable, 
+                                     KQueues, TaskReadyAges, RoundRobinToken, 
+                                     tid_, task, HasWork, I_, J, K, L, kq_out, 
+                                     current_time, lqbuf, wr, tid, I, fildes_, 
+                                     Steps_, fildes, Steps, PolledRead >>
 
 Flush_Check_Timer(self) == /\ pc[self] = "Flush_Check_Timer"
                            /\ IF LQB[self][I_[self]].state = TSBTimer
@@ -1598,18 +2281,18 @@ Flush_Check_Timer(self) == /\ pc[self] = "Flush_Check_Timer"
                                       /\ LQB' = LQB
                            /\ pc' = [pc EXCEPT ![self] = "Flush_Ready_Check_Ready"]
                            /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, 
-                                           GQBSize, GQLock, LQA, LQAClock, 
-                                           LQASizes, LQBSizes, LQLocks, 
-                                           TaskIdCurrent, TasksFinished, 
-                                           RTStarted, RTStopped, Futures, 
-                                           FuturePush, FuturesBlocked, 
+                                           GQBSize, GQPPPointer, GQLock, LQA, 
+                                           LQAClock, ClkCycles, LQASizes, 
+                                           LQBSizes, LQLocks, TaskIdCurrent, 
+                                           TasksFinished, RTStarted, RTStopped, 
+                                           Futures, FuturePush, FuturesBlocked, 
                                            FutureWorkers, FDReadsAvailable, 
                                            FDWritesAvailable, KQueues, 
-                                           KContinueLock, Worker_Wakeup, tid_, 
-                                           task, HasWork, I_, J, K, L, kq_out, 
-                                           current_time, lqbuf, wr, tid, I, 
-                                           fildes_, Steps_, fildes, Steps, 
-                                           PolledRead >>
+                                           TaskReadyAges, RoundRobinToken, 
+                                           tid_, task, HasWork, I_, J, K, L, 
+                                           kq_out, current_time, lqbuf, wr, 
+                                           tid, I, fildes_, Steps_, fildes, 
+                                           Steps, PolledRead >>
 
 Flush_Ready_Check_Ready(self) == /\ pc[self] = "Flush_Ready_Check_Ready"
                                  /\ IF LQB[self][I_[self]].state = TSReady
@@ -1621,34 +2304,36 @@ Flush_Ready_Check_Ready(self) == /\ pc[self] = "Flush_Ready_Check_Ready"
                                                   THEN /\ pc' = [pc EXCEPT ![self] = "Flush_Ready_Check_Ready_Move_Old"]
                                                   ELSE /\ pc' = [pc EXCEPT ![self] = "Flush_Ready_Step"]
                                  /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, 
-                                                 GQBSize, GQLock, LQA, 
-                                                 LQAClock, LQASizes, LQBSizes, 
-                                                 LQLocks, TaskIdCurrent, 
-                                                 TasksFinished, RTStarted, 
-                                                 RTStopped, Futures, 
+                                                 GQBSize, GQPPPointer, GQLock, 
+                                                 LQA, LQAClock, ClkCycles, 
+                                                 LQASizes, LQBSizes, LQLocks, 
+                                                 TaskIdCurrent, TasksFinished, 
+                                                 RTStarted, RTStopped, Futures, 
                                                  FuturePush, FuturesBlocked, 
                                                  FutureWorkers, 
                                                  FDReadsAvailable, 
                                                  FDWritesAvailable, KQueues, 
-                                                 KContinueLock, Worker_Wakeup, 
-                                                 tid_, task, HasWork, I_, J, L, 
-                                                 kq_out, current_time, lqbuf, 
-                                                 wr, tid, I, fildes_, Steps_, 
-                                                 fildes, Steps, PolledRead >>
+                                                 TaskReadyAges, 
+                                                 RoundRobinToken, tid_, task, 
+                                                 HasWork, I_, J, L, kq_out, 
+                                                 current_time, lqbuf, wr, tid, 
+                                                 I, fildes_, Steps_, fildes, 
+                                                 Steps, PolledRead >>
 
 CheckLQSize_(self) == /\ pc[self] = "CheckLQSize_"
                       /\ IF LQASizes[self] = LQSize
                             THEN /\ pc' = [pc EXCEPT ![self] = "LockGQ_"]
                             ELSE /\ pc' = [pc EXCEPT ![self] = "PushLQ_"]
                       /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
-                                      GQLock, LQA, LQAClock, LQASizes, LQB, 
-                                      LQBSizes, LQLocks, TaskIdCurrent, 
-                                      TasksFinished, RTStarted, RTStopped, 
-                                      Futures, FuturePush, FuturesBlocked, 
+                                      GQPPPointer, GQLock, LQA, LQAClock, 
+                                      ClkCycles, LQASizes, LQB, LQBSizes, 
+                                      LQLocks, TaskIdCurrent, TasksFinished, 
+                                      RTStarted, RTStopped, Futures, 
+                                      FuturePush, FuturesBlocked, 
                                       FutureWorkers, FDReadsAvailable, 
                                       FDWritesAvailable, KQueues, 
-                                      KContinueLock, Worker_Wakeup, tid_, task, 
-                                      HasWork, I_, J, K, L, kq_out, 
+                                      TaskReadyAges, RoundRobinToken, tid_, 
+                                      task, HasWork, I_, J, K, L, kq_out, 
                                       current_time, lqbuf, wr, tid, I, fildes_, 
                                       Steps_, fildes, Steps, PolledRead >>
 
@@ -1657,13 +2342,14 @@ LockGQ_(self) == /\ pc[self] = "LockGQ_"
                  /\ GQLock' = self
                  /\ L' = [L EXCEPT ![self] = LQSize \div 2 + 1]
                  /\ pc' = [pc EXCEPT ![self] = "PushGQLoop_"]
-                 /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, LQA, 
-                                 LQAClock, LQASizes, LQB, LQBSizes, LQLocks, 
+                 /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
+                                 GQPPPointer, LQA, LQAClock, ClkCycles, 
+                                 LQASizes, LQB, LQBSizes, LQLocks, 
                                  TaskIdCurrent, TasksFinished, RTStarted, 
                                  RTStopped, Futures, FuturePush, 
                                  FuturesBlocked, FutureWorkers, 
                                  FDReadsAvailable, FDWritesAvailable, KQueues, 
-                                 KContinueLock, Worker_Wakeup, tid_, task, 
+                                 TaskReadyAges, RoundRobinToken, tid_, task, 
                                  HasWork, I_, J, K, kq_out, current_time, 
                                  lqbuf, wr, tid, I, fildes_, Steps_, fildes, 
                                  Steps, PolledRead >>
@@ -1673,34 +2359,35 @@ PushGQLoop_(self) == /\ pc[self] = "PushGQLoop_"
                            THEN /\ pc' = [pc EXCEPT ![self] = "PushGQStatusCheck_"]
                            ELSE /\ pc' = [pc EXCEPT ![self] = "UnlockGQ_"]
                      /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
-                                     GQLock, LQA, LQAClock, LQASizes, LQB, 
-                                     LQBSizes, LQLocks, TaskIdCurrent, 
-                                     TasksFinished, RTStarted, RTStopped, 
-                                     Futures, FuturePush, FuturesBlocked, 
-                                     FutureWorkers, FDReadsAvailable, 
-                                     FDWritesAvailable, KQueues, KContinueLock, 
-                                     Worker_Wakeup, tid_, task, HasWork, I_, J, 
-                                     K, L, kq_out, current_time, lqbuf, wr, 
-                                     tid, I, fildes_, Steps_, fildes, Steps, 
-                                     PolledRead >>
+                                     GQPPPointer, GQLock, LQA, LQAClock, 
+                                     ClkCycles, LQASizes, LQB, LQBSizes, 
+                                     LQLocks, TaskIdCurrent, TasksFinished, 
+                                     RTStarted, RTStopped, Futures, FuturePush, 
+                                     FuturesBlocked, FutureWorkers, 
+                                     FDReadsAvailable, FDWritesAvailable, 
+                                     KQueues, TaskReadyAges, RoundRobinToken, 
+                                     tid_, task, HasWork, I_, J, K, L, kq_out, 
+                                     current_time, lqbuf, wr, tid, I, fildes_, 
+                                     Steps_, fildes, Steps, PolledRead >>
 
 PushGQStatusCheck_(self) == /\ pc[self] = "PushGQStatusCheck_"
                             /\ IF LQA[self][L[self]] # NullTask
                                   THEN /\ pc' = [pc EXCEPT ![self] = "PushTaskNotNull_"]
                                   ELSE /\ pc' = [pc EXCEPT ![self] = "GQPushWhileStep_"]
                             /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, 
-                                            GQBSize, GQLock, LQA, LQAClock, 
-                                            LQASizes, LQB, LQBSizes, LQLocks, 
-                                            TaskIdCurrent, TasksFinished, 
-                                            RTStarted, RTStopped, Futures, 
-                                            FuturePush, FuturesBlocked, 
-                                            FutureWorkers, FDReadsAvailable, 
+                                            GQBSize, GQPPPointer, GQLock, LQA, 
+                                            LQAClock, ClkCycles, LQASizes, LQB, 
+                                            LQBSizes, LQLocks, TaskIdCurrent, 
+                                            TasksFinished, RTStarted, 
+                                            RTStopped, Futures, FuturePush, 
+                                            FuturesBlocked, FutureWorkers, 
+                                            FDReadsAvailable, 
                                             FDWritesAvailable, KQueues, 
-                                            KContinueLock, Worker_Wakeup, tid_, 
-                                            task, HasWork, I_, J, K, L, kq_out, 
-                                            current_time, lqbuf, wr, tid, I, 
-                                            fildes_, Steps_, fildes, Steps, 
-                                            PolledRead >>
+                                            TaskReadyAges, RoundRobinToken, 
+                                            tid_, task, HasWork, I_, J, K, L, 
+                                            kq_out, current_time, lqbuf, wr, 
+                                            tid, I, fildes_, Steps_, fildes, 
+                                            Steps, PolledRead >>
 
 PushTaskNotNull_(self) == /\ pc[self] = "PushTaskNotNull_"
                           /\ IF LQA[self][L[self]].state = TSReady
@@ -1722,14 +2409,14 @@ PushTaskNotNull_(self) == /\ pc[self] = "PushTaskNotNull_"
                                                 /\ UNCHANGED << GQB, GQBSize, 
                                                                 LQA, KQueues >>
                                      /\ UNCHANGED << GQA, GQALast >>
-                          /\ UNCHANGED << GQAFirst, GQLock, LQAClock, LQASizes, 
-                                          LQB, LQBSizes, LQLocks, 
-                                          TaskIdCurrent, TasksFinished, 
-                                          RTStarted, RTStopped, Futures, 
-                                          FuturePush, FuturesBlocked, 
+                          /\ UNCHANGED << GQAFirst, GQPPPointer, GQLock, 
+                                          LQAClock, ClkCycles, LQASizes, LQB, 
+                                          LQBSizes, LQLocks, TaskIdCurrent, 
+                                          TasksFinished, RTStarted, RTStopped, 
+                                          Futures, FuturePush, FuturesBlocked, 
                                           FutureWorkers, FDReadsAvailable, 
-                                          FDWritesAvailable, KContinueLock, 
-                                          Worker_Wakeup, tid_, task, HasWork, 
+                                          FDWritesAvailable, TaskReadyAges, 
+                                          RoundRobinToken, tid_, task, HasWork, 
                                           I_, J, K, L, kq_out, current_time, 
                                           lqbuf, wr, tid, I, fildes_, Steps_, 
                                           fildes, Steps, PolledRead >>
@@ -1741,13 +2428,14 @@ PushGQPushToKQ_(self) == /\ pc[self] = "PushGQPushToKQ_"
                                     /\ UNCHANGED KQueues
                          /\ pc' = [pc EXCEPT ![self] = "GQPushWhileStep_"]
                          /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
-                                         GQLock, LQA, LQAClock, LQASizes, LQB, 
-                                         LQBSizes, LQLocks, TaskIdCurrent, 
-                                         TasksFinished, RTStarted, RTStopped, 
-                                         Futures, FuturePush, FuturesBlocked, 
+                                         GQPPPointer, GQLock, LQA, LQAClock, 
+                                         ClkCycles, LQASizes, LQB, LQBSizes, 
+                                         LQLocks, TaskIdCurrent, TasksFinished, 
+                                         RTStarted, RTStopped, Futures, 
+                                         FuturePush, FuturesBlocked, 
                                          FutureWorkers, FDReadsAvailable, 
-                                         FDWritesAvailable, KContinueLock, 
-                                         Worker_Wakeup, tid_, task, HasWork, 
+                                         FDWritesAvailable, TaskReadyAges, 
+                                         RoundRobinToken, tid_, task, HasWork, 
                                          I_, J, K, L, kq_out, current_time, 
                                          lqbuf, wr, tid, I, fildes_, Steps_, 
                                          fildes, Steps, PolledRead >>
@@ -1756,13 +2444,14 @@ GQPushWhileStep_(self) == /\ pc[self] = "GQPushWhileStep_"
                           /\ L' = [L EXCEPT ![self] = L[self] + 1]
                           /\ pc' = [pc EXCEPT ![self] = "PushGQLoop_"]
                           /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
-                                          GQLock, LQA, LQAClock, LQASizes, LQB, 
-                                          LQBSizes, LQLocks, TaskIdCurrent, 
+                                          GQPPPointer, GQLock, LQA, LQAClock, 
+                                          ClkCycles, LQASizes, LQB, LQBSizes, 
+                                          LQLocks, TaskIdCurrent, 
                                           TasksFinished, RTStarted, RTStopped, 
                                           Futures, FuturePush, FuturesBlocked, 
                                           FutureWorkers, FDReadsAvailable, 
                                           FDWritesAvailable, KQueues, 
-                                          KContinueLock, Worker_Wakeup, tid_, 
+                                          TaskReadyAges, RoundRobinToken, tid_, 
                                           task, HasWork, I_, J, K, kq_out, 
                                           current_time, lqbuf, wr, tid, I, 
                                           fildes_, Steps_, fildes, Steps, 
@@ -1772,16 +2461,17 @@ UnlockGQ_(self) == /\ pc[self] = "UnlockGQ_"
                    /\ GQLock' = NullLock
                    /\ LQASizes' = [LQASizes EXCEPT ![self] = LQSize \div 2]
                    /\ pc' = [pc EXCEPT ![self] = "CheckClock_"]
-                   /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, LQA, 
-                                   LQAClock, LQB, LQBSizes, LQLocks, 
-                                   TaskIdCurrent, TasksFinished, RTStarted, 
-                                   RTStopped, Futures, FuturePush, 
-                                   FuturesBlocked, FutureWorkers, 
-                                   FDReadsAvailable, FDWritesAvailable, 
-                                   KQueues, KContinueLock, Worker_Wakeup, tid_, 
-                                   task, HasWork, I_, J, K, L, kq_out, 
-                                   current_time, lqbuf, wr, tid, I, fildes_, 
-                                   Steps_, fildes, Steps, PolledRead >>
+                   /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
+                                   GQPPPointer, LQA, LQAClock, ClkCycles, LQB, 
+                                   LQBSizes, LQLocks, TaskIdCurrent, 
+                                   TasksFinished, RTStarted, RTStopped, 
+                                   Futures, FuturePush, FuturesBlocked, 
+                                   FutureWorkers, FDReadsAvailable, 
+                                   FDWritesAvailable, KQueues, TaskReadyAges, 
+                                   RoundRobinToken, tid_, task, HasWork, I_, J, 
+                                   K, L, kq_out, current_time, lqbuf, wr, tid, 
+                                   I, fildes_, Steps_, fildes, Steps, 
+                                   PolledRead >>
 
 CheckClock_(self) == /\ pc[self] = "CheckClock_"
                      /\ IF LQAClock[self] > LQASizes[self]
@@ -1792,39 +2482,42 @@ CheckClock_(self) == /\ pc[self] = "CheckClock_"
                                 /\ UNCHANGED << LQA, LQAClock, LQASizes >>
                      /\ pc' = [pc EXCEPT ![self] = "PushLQ_"]
                      /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
-                                     GQLock, LQB, LQBSizes, LQLocks, 
-                                     TaskIdCurrent, TasksFinished, RTStarted, 
-                                     RTStopped, Futures, FuturePush, 
-                                     FuturesBlocked, FutureWorkers, 
-                                     FDReadsAvailable, FDWritesAvailable, 
-                                     KQueues, KContinueLock, Worker_Wakeup, 
-                                     tid_, task, HasWork, I_, J, K, L, kq_out, 
-                                     current_time, lqbuf, wr, tid, I, fildes_, 
-                                     Steps_, fildes, Steps, PolledRead >>
+                                     GQPPPointer, GQLock, ClkCycles, LQB, 
+                                     LQBSizes, LQLocks, TaskIdCurrent, 
+                                     TasksFinished, RTStarted, RTStopped, 
+                                     Futures, FuturePush, FuturesBlocked, 
+                                     FutureWorkers, FDReadsAvailable, 
+                                     FDWritesAvailable, KQueues, TaskReadyAges, 
+                                     RoundRobinToken, tid_, task, HasWork, I_, 
+                                     J, K, L, kq_out, current_time, lqbuf, wr, 
+                                     tid, I, fildes_, Steps_, fildes, Steps, 
+                                     PolledRead >>
 
 PushLQ_(self) == /\ pc[self] = "PushLQ_"
                  /\ LQASizes' = [LQASizes EXCEPT ![self] = LQASizes[self] + 1]
                  /\ LQA' = [LQA EXCEPT ![self][LQASizes'[self]] = LQB[self][I_[self]]]
+                 /\ TaskReadyAges' = [TaskReadyAges EXCEPT ![LQA'[self][LQASizes'[self]].t_id] = 0]
                  /\ pc' = [pc EXCEPT ![self] = "Flush_Ready_Step"]
-                 /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, GQLock, 
-                                 LQAClock, LQB, LQBSizes, LQLocks, 
-                                 TaskIdCurrent, TasksFinished, RTStarted, 
-                                 RTStopped, Futures, FuturePush, 
-                                 FuturesBlocked, FutureWorkers, 
+                 /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
+                                 GQPPPointer, GQLock, LQAClock, ClkCycles, LQB, 
+                                 LQBSizes, LQLocks, TaskIdCurrent, 
+                                 TasksFinished, RTStarted, RTStopped, Futures, 
+                                 FuturePush, FuturesBlocked, FutureWorkers, 
                                  FDReadsAvailable, FDWritesAvailable, KQueues, 
-                                 KContinueLock, Worker_Wakeup, tid_, task, 
-                                 HasWork, I_, J, K, L, kq_out, current_time, 
-                                 lqbuf, wr, tid, I, fildes_, Steps_, fildes, 
-                                 Steps, PolledRead >>
+                                 RoundRobinToken, tid_, task, HasWork, I_, J, 
+                                 K, L, kq_out, current_time, lqbuf, wr, tid, I, 
+                                 fildes_, Steps_, fildes, Steps, PolledRead >>
 
 Flush_Ready_Check_Ready_Move_Old(self) == /\ pc[self] = "Flush_Ready_Check_Ready_Move_Old"
                                           /\ LQB' = [LQB EXCEPT ![self][I_[self]] = NullTask]
                                           /\ pc' = [pc EXCEPT ![self] = "Flush_Ready_Step"]
                                           /\ UNCHANGED << GQA, GQAFirst, 
                                                           GQALast, GQB, 
-                                                          GQBSize, GQLock, LQA, 
-                                                          LQAClock, LQASizes, 
-                                                          LQBSizes, LQLocks, 
+                                                          GQBSize, GQPPPointer, 
+                                                          GQLock, LQA, 
+                                                          LQAClock, ClkCycles, 
+                                                          LQASizes, LQBSizes, 
+                                                          LQLocks, 
                                                           TaskIdCurrent, 
                                                           TasksFinished, 
                                                           RTStarted, RTStopped, 
@@ -1834,10 +2527,10 @@ Flush_Ready_Check_Ready_Move_Old(self) == /\ pc[self] = "Flush_Ready_Check_Ready
                                                           FDReadsAvailable, 
                                                           FDWritesAvailable, 
                                                           KQueues, 
-                                                          KContinueLock, 
-                                                          Worker_Wakeup, tid_, 
-                                                          task, HasWork, I_, J, 
-                                                          K, L, kq_out, 
+                                                          TaskReadyAges, 
+                                                          RoundRobinToken, 
+                                                          tid_, task, HasWork, 
+                                                          I_, J, K, L, kq_out, 
                                                           current_time, lqbuf, 
                                                           wr, tid, I, fildes_, 
                                                           Steps_, fildes, 
@@ -1847,13 +2540,14 @@ Flush_Ready_Step(self) == /\ pc[self] = "Flush_Ready_Step"
                           /\ I_' = [I_ EXCEPT ![self] = I_[self] + 1]
                           /\ pc' = [pc EXCEPT ![self] = "Flush_Ready"]
                           /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
-                                          GQLock, LQA, LQAClock, LQASizes, LQB, 
-                                          LQBSizes, LQLocks, TaskIdCurrent, 
+                                          GQPPPointer, GQLock, LQA, LQAClock, 
+                                          ClkCycles, LQASizes, LQB, LQBSizes, 
+                                          LQLocks, TaskIdCurrent, 
                                           TasksFinished, RTStarted, RTStopped, 
                                           Futures, FuturePush, FuturesBlocked, 
                                           FutureWorkers, FDReadsAvailable, 
                                           FDWritesAvailable, KQueues, 
-                                          KContinueLock, Worker_Wakeup, tid_, 
+                                          TaskReadyAges, RoundRobinToken, tid_, 
                                           task, HasWork, J, K, L, kq_out, 
                                           current_time, lqbuf, wr, tid, I, 
                                           fildes_, Steps_, fildes, Steps, 
@@ -1863,13 +2557,14 @@ Flush_Ready_Done(self) == /\ pc[self] = "Flush_Ready_Done"
                           /\ LQBSizes' = [LQBSizes EXCEPT ![self] = K[self]]
                           /\ pc' = [pc EXCEPT ![self] = "LQ_Reset_Clock"]
                           /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
-                                          GQLock, LQA, LQAClock, LQASizes, LQB, 
-                                          LQLocks, TaskIdCurrent, 
-                                          TasksFinished, RTStarted, RTStopped, 
-                                          Futures, FuturePush, FuturesBlocked, 
+                                          GQPPPointer, GQLock, LQA, LQAClock, 
+                                          ClkCycles, LQASizes, LQB, LQLocks, 
+                                          TaskIdCurrent, TasksFinished, 
+                                          RTStarted, RTStopped, Futures, 
+                                          FuturePush, FuturesBlocked, 
                                           FutureWorkers, FDReadsAvailable, 
                                           FDWritesAvailable, KQueues, 
-                                          KContinueLock, Worker_Wakeup, tid_, 
+                                          TaskReadyAges, RoundRobinToken, tid_, 
                                           task, HasWork, I_, J, K, L, kq_out, 
                                           current_time, lqbuf, wr, tid, I, 
                                           fildes_, Steps_, fildes, Steps, 
@@ -1879,13 +2574,14 @@ LQ_Reset_Clock(self) == /\ pc[self] = "LQ_Reset_Clock"
                         /\ LQAClock' = [LQAClock EXCEPT ![self] = LQASizes[self] + 1]
                         /\ pc' = [pc EXCEPT ![self] = "LQ_Pull"]
                         /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
-                                        GQLock, LQA, LQASizes, LQB, LQBSizes, 
-                                        LQLocks, TaskIdCurrent, TasksFinished, 
+                                        GQPPPointer, GQLock, LQA, ClkCycles, 
+                                        LQASizes, LQB, LQBSizes, LQLocks, 
+                                        TaskIdCurrent, TasksFinished, 
                                         RTStarted, RTStopped, Futures, 
                                         FuturePush, FuturesBlocked, 
                                         FutureWorkers, FDReadsAvailable, 
                                         FDWritesAvailable, KQueues, 
-                                        KContinueLock, Worker_Wakeup, tid_, 
+                                        TaskReadyAges, RoundRobinToken, tid_, 
                                         task, HasWork, I_, J, K, L, kq_out, 
                                         current_time, lqbuf, wr, tid, I, 
                                         fildes_, Steps_, fildes, Steps, 
@@ -1900,27 +2596,28 @@ LQ_Pull(self) == /\ pc[self] = "LQ_Pull"
                             /\ task' = [task EXCEPT ![self] = LQA'[self][LQAClock'[self]]]
                             /\ HasWork' = [HasWork EXCEPT ![self] = TRUE]
                  /\ pc' = [pc EXCEPT ![self] = "LQ_Unlock"]
-                 /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, GQLock, 
-                                 LQASizes, LQB, LQBSizes, LQLocks, 
-                                 TaskIdCurrent, TasksFinished, RTStarted, 
-                                 RTStopped, Futures, FuturePush, 
-                                 FuturesBlocked, FutureWorkers, 
+                 /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
+                                 GQPPPointer, GQLock, ClkCycles, LQASizes, LQB, 
+                                 LQBSizes, LQLocks, TaskIdCurrent, 
+                                 TasksFinished, RTStarted, RTStopped, Futures, 
+                                 FuturePush, FuturesBlocked, FutureWorkers, 
                                  FDReadsAvailable, FDWritesAvailable, KQueues, 
-                                 KContinueLock, Worker_Wakeup, tid_, I_, J, K, 
-                                 L, kq_out, current_time, lqbuf, wr, tid, I, 
+                                 TaskReadyAges, RoundRobinToken, tid_, I_, J, 
+                                 K, L, kq_out, current_time, lqbuf, wr, tid, I, 
                                  fildes_, Steps_, fildes, Steps, PolledRead >>
 
 LQ_Unlock(self) == /\ pc[self] = "LQ_Unlock"
                    /\ LQLocks' = [LQLocks EXCEPT ![self] = NullLock]
                    /\ pc' = [pc EXCEPT ![self] = "CheckHasWork"]
                    /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
-                                   GQLock, LQA, LQAClock, LQASizes, LQB, 
-                                   LQBSizes, TaskIdCurrent, TasksFinished, 
-                                   RTStarted, RTStopped, Futures, FuturePush, 
+                                   GQPPPointer, GQLock, LQA, LQAClock, 
+                                   ClkCycles, LQASizes, LQB, LQBSizes, 
+                                   TaskIdCurrent, TasksFinished, RTStarted, 
+                                   RTStopped, Futures, FuturePush, 
                                    FuturesBlocked, FutureWorkers, 
                                    FDReadsAvailable, FDWritesAvailable, 
-                                   KQueues, KContinueLock, Worker_Wakeup, tid_, 
-                                   task, HasWork, I_, J, K, L, kq_out, 
+                                   KQueues, TaskReadyAges, RoundRobinToken, 
+                                   tid_, task, HasWork, I_, J, K, L, kq_out, 
                                    current_time, lqbuf, wr, tid, I, fildes_, 
                                    Steps_, fildes, Steps, PolledRead >>
 
@@ -1929,14 +2626,15 @@ CheckHasWork(self) == /\ pc[self] = "CheckHasWork"
                             THEN /\ pc' = [pc EXCEPT ![self] = "AttemptEnqueueFromGlobalLockLQ"]
                             ELSE /\ pc' = [pc EXCEPT ![self] = "Has_Work_Loop"]
                       /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
-                                      GQLock, LQA, LQAClock, LQASizes, LQB, 
-                                      LQBSizes, LQLocks, TaskIdCurrent, 
-                                      TasksFinished, RTStarted, RTStopped, 
-                                      Futures, FuturePush, FuturesBlocked, 
+                                      GQPPPointer, GQLock, LQA, LQAClock, 
+                                      ClkCycles, LQASizes, LQB, LQBSizes, 
+                                      LQLocks, TaskIdCurrent, TasksFinished, 
+                                      RTStarted, RTStopped, Futures, 
+                                      FuturePush, FuturesBlocked, 
                                       FutureWorkers, FDReadsAvailable, 
                                       FDWritesAvailable, KQueues, 
-                                      KContinueLock, Worker_Wakeup, tid_, task, 
-                                      HasWork, I_, J, K, L, kq_out, 
+                                      TaskReadyAges, RoundRobinToken, tid_, 
+                                      task, HasWork, I_, J, K, L, kq_out, 
                                       current_time, lqbuf, wr, tid, I, fildes_, 
                                       Steps_, fildes, Steps, PolledRead >>
 
@@ -1946,10 +2644,11 @@ AttemptEnqueueFromGlobalLockLQ(self) == /\ pc[self] = "AttemptEnqueueFromGlobalL
                                         /\ K' = [K EXCEPT ![self] = 0]
                                         /\ pc' = [pc EXCEPT ![self] = "AttemptEnqueueFromGlobalLockGQ"]
                                         /\ UNCHANGED << GQA, GQAFirst, GQALast, 
-                                                        GQB, GQBSize, GQLock, 
+                                                        GQB, GQBSize, 
+                                                        GQPPPointer, GQLock, 
                                                         LQA, LQAClock, 
-                                                        LQASizes, LQB, 
-                                                        LQBSizes, 
+                                                        ClkCycles, LQASizes, 
+                                                        LQB, LQBSizes, 
                                                         TaskIdCurrent, 
                                                         TasksFinished, 
                                                         RTStarted, RTStopped, 
@@ -1958,8 +2657,8 @@ AttemptEnqueueFromGlobalLockLQ(self) == /\ pc[self] = "AttemptEnqueueFromGlobalL
                                                         FutureWorkers, 
                                                         FDReadsAvailable, 
                                                         FDWritesAvailable, 
-                                                        KQueues, KContinueLock, 
-                                                        Worker_Wakeup, tid_, 
+                                                        KQueues, TaskReadyAges, 
+                                                        RoundRobinToken, tid_, 
                                                         task, HasWork, I_, J, 
                                                         L, kq_out, 
                                                         current_time, lqbuf, 
@@ -1972,9 +2671,11 @@ AttemptEnqueueFromGlobalLockGQ(self) == /\ pc[self] = "AttemptEnqueueFromGlobalL
                                         /\ GQLock' = self
                                         /\ pc' = [pc EXCEPT ![self] = "GQ_Poll_Check_KQ"]
                                         /\ UNCHANGED << GQA, GQAFirst, GQALast, 
-                                                        GQB, GQBSize, LQA, 
-                                                        LQAClock, LQASizes, 
-                                                        LQB, LQBSizes, LQLocks, 
+                                                        GQB, GQBSize, 
+                                                        GQPPPointer, LQA, 
+                                                        LQAClock, ClkCycles, 
+                                                        LQASizes, LQB, 
+                                                        LQBSizes, LQLocks, 
                                                         TaskIdCurrent, 
                                                         TasksFinished, 
                                                         RTStarted, RTStopped, 
@@ -1983,8 +2684,8 @@ AttemptEnqueueFromGlobalLockGQ(self) == /\ pc[self] = "AttemptEnqueueFromGlobalL
                                                         FutureWorkers, 
                                                         FDReadsAvailable, 
                                                         FDWritesAvailable, 
-                                                        KQueues, KContinueLock, 
-                                                        Worker_Wakeup, tid_, 
+                                                        KQueues, TaskReadyAges, 
+                                                        RoundRobinToken, tid_, 
                                                         task, HasWork, I_, J, 
                                                         K, L, kq_out, 
                                                         current_time, lqbuf, 
@@ -1994,16 +2695,17 @@ AttemptEnqueueFromGlobalLockGQ(self) == /\ pc[self] = "AttemptEnqueueFromGlobalL
 
 GQ_Poll_Check_KQ(self) == /\ pc[self] = "GQ_Poll_Check_KQ"
                           /\ IF KQueues[0] = NullKQ
-                                THEN /\ pc' = [pc EXCEPT ![self] = "GQ_Flush_Ready"]
+                                THEN /\ pc' = [pc EXCEPT ![self] = "GQ_Flush_Ready_Begin"]
                                 ELSE /\ pc' = [pc EXCEPT ![self] = "GQ_Poll_KQ_Begin"]
                           /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
-                                          GQLock, LQA, LQAClock, LQASizes, LQB, 
-                                          LQBSizes, LQLocks, TaskIdCurrent, 
+                                          GQPPPointer, GQLock, LQA, LQAClock, 
+                                          ClkCycles, LQASizes, LQB, LQBSizes, 
+                                          LQLocks, TaskIdCurrent, 
                                           TasksFinished, RTStarted, RTStopped, 
                                           Futures, FuturePush, FuturesBlocked, 
                                           FutureWorkers, FDReadsAvailable, 
                                           FDWritesAvailable, KQueues, 
-                                          KContinueLock, Worker_Wakeup, tid_, 
+                                          TaskReadyAges, RoundRobinToken, tid_, 
                                           task, HasWork, I_, J, K, L, kq_out, 
                                           current_time, lqbuf, wr, tid, I, 
                                           fildes_, Steps_, fildes, Steps, 
@@ -2016,13 +2718,14 @@ GQ_Poll_KQ_Begin(self) == /\ pc[self] = "GQ_Poll_KQ_Begin"
                                                                          ELSE ESeq]
                           /\ pc' = [pc EXCEPT ![self] = "GQ_Update_Ready"]
                           /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
-                                          GQLock, LQA, LQAClock, LQASizes, LQB, 
-                                          LQBSizes, LQLocks, TaskIdCurrent, 
+                                          GQPPPointer, GQLock, LQA, LQAClock, 
+                                          ClkCycles, LQASizes, LQB, LQBSizes, 
+                                          LQLocks, TaskIdCurrent, 
                                           TasksFinished, RTStarted, RTStopped, 
                                           Futures, FuturePush, FuturesBlocked, 
                                           FutureWorkers, FDReadsAvailable, 
-                                          FDWritesAvailable, KContinueLock, 
-                                          Worker_Wakeup, tid_, task, HasWork, 
+                                          FDWritesAvailable, TaskReadyAges, 
+                                          RoundRobinToken, tid_, task, HasWork, 
                                           I_, J, K, L, current_time, lqbuf, wr, 
                                           tid, I, fildes_, Steps_, fildes, 
                                           Steps, PolledRead >>
@@ -2038,34 +2741,53 @@ GQ_Update_Ready(self) == /\ pc[self] = "GQ_Update_Ready"
                                                !.blocked_io_info.eof = kq_out[self][x].eof
                                            ]
                                    ELSE GQB[i]]
-                         /\ I_' = [I_ EXCEPT ![self] = 1]
-                         /\ K' = [K EXCEPT ![self] = 0]
-                         /\ pc' = [pc EXCEPT ![self] = "GQ_Flush_Ready"]
+                         /\ pc' = [pc EXCEPT ![self] = "GQ_Flush_Ready_Begin"]
                          /\ UNCHANGED << GQA, GQAFirst, GQALast, GQBSize, 
-                                         GQLock, LQA, LQAClock, LQASizes, LQB, 
-                                         LQBSizes, LQLocks, TaskIdCurrent, 
-                                         TasksFinished, RTStarted, RTStopped, 
-                                         Futures, FuturePush, FuturesBlocked, 
+                                         GQPPPointer, GQLock, LQA, LQAClock, 
+                                         ClkCycles, LQASizes, LQB, LQBSizes, 
+                                         LQLocks, TaskIdCurrent, TasksFinished, 
+                                         RTStarted, RTStopped, Futures, 
+                                         FuturePush, FuturesBlocked, 
                                          FutureWorkers, FDReadsAvailable, 
                                          FDWritesAvailable, KQueues, 
-                                         KContinueLock, Worker_Wakeup, tid_, 
-                                         task, HasWork, J, L, kq_out, 
+                                         TaskReadyAges, RoundRobinToken, tid_, 
+                                         task, HasWork, I_, J, K, L, kq_out, 
                                          current_time, lqbuf, wr, tid, I, 
                                          fildes_, Steps_, fildes, Steps, 
                                          PolledRead >>
+
+GQ_Flush_Ready_Begin(self) == /\ pc[self] = "GQ_Flush_Ready_Begin"
+                              /\ I_' = [I_ EXCEPT ![self] = 1]
+                              /\ K' = [K EXCEPT ![self] = 0]
+                              /\ pc' = [pc EXCEPT ![self] = "GQ_Flush_Ready"]
+                              /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, 
+                                              GQBSize, GQPPPointer, GQLock, 
+                                              LQA, LQAClock, ClkCycles, 
+                                              LQASizes, LQB, LQBSizes, LQLocks, 
+                                              TaskIdCurrent, TasksFinished, 
+                                              RTStarted, RTStopped, Futures, 
+                                              FuturePush, FuturesBlocked, 
+                                              FutureWorkers, FDReadsAvailable, 
+                                              FDWritesAvailable, KQueues, 
+                                              TaskReadyAges, RoundRobinToken, 
+                                              tid_, task, HasWork, J, L, 
+                                              kq_out, current_time, lqbuf, wr, 
+                                              tid, I, fildes_, Steps_, fildes, 
+                                              Steps, PolledRead >>
 
 GQ_Flush_Ready(self) == /\ pc[self] = "GQ_Flush_Ready"
                         /\ IF I_[self] <= GQBSize
                               THEN /\ pc' = [pc EXCEPT ![self] = "GQ_Flush_Check_Timer"]
                               ELSE /\ pc' = [pc EXCEPT ![self] = "GQ_Flush_Ready_Done"]
                         /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
-                                        GQLock, LQA, LQAClock, LQASizes, LQB, 
-                                        LQBSizes, LQLocks, TaskIdCurrent, 
-                                        TasksFinished, RTStarted, RTStopped, 
-                                        Futures, FuturePush, FuturesBlocked, 
+                                        GQPPPointer, GQLock, LQA, LQAClock, 
+                                        ClkCycles, LQASizes, LQB, LQBSizes, 
+                                        LQLocks, TaskIdCurrent, TasksFinished, 
+                                        RTStarted, RTStopped, Futures, 
+                                        FuturePush, FuturesBlocked, 
                                         FutureWorkers, FDReadsAvailable, 
                                         FDWritesAvailable, KQueues, 
-                                        KContinueLock, Worker_Wakeup, tid_, 
+                                        TaskReadyAges, RoundRobinToken, tid_, 
                                         task, HasWork, I_, J, K, L, kq_out, 
                                         current_time, lqbuf, wr, tid, I, 
                                         fildes_, Steps_, fildes, Steps, 
@@ -2080,14 +2802,15 @@ GQ_Flush_Check_Timer(self) == /\ pc[self] = "GQ_Flush_Check_Timer"
                                          /\ GQB' = GQB
                               /\ pc' = [pc EXCEPT ![self] = "GQ_Flush_Ready_Check_Ready"]
                               /\ UNCHANGED << GQA, GQAFirst, GQALast, GQBSize, 
-                                              GQLock, LQA, LQAClock, LQASizes, 
+                                              GQPPPointer, GQLock, LQA, 
+                                              LQAClock, ClkCycles, LQASizes, 
                                               LQB, LQBSizes, LQLocks, 
                                               TaskIdCurrent, TasksFinished, 
                                               RTStarted, RTStopped, Futures, 
                                               FuturePush, FuturesBlocked, 
                                               FutureWorkers, FDReadsAvailable, 
                                               FDWritesAvailable, KQueues, 
-                                              KContinueLock, Worker_Wakeup, 
+                                              TaskReadyAges, RoundRobinToken, 
                                               tid_, task, HasWork, I_, J, K, L, 
                                               kq_out, current_time, lqbuf, wr, 
                                               tid, I, fildes_, Steps_, fildes, 
@@ -2097,40 +2820,44 @@ GQ_Flush_Ready_Check_Ready(self) == /\ pc[self] = "GQ_Flush_Ready_Check_Ready"
                                     /\ IF GQB[I_[self]].state = TSReady
                                           THEN /\ GQALast' = GQALast + 1
                                                /\ GQA' = [GQA EXCEPT ![((GQALast' - 1) % GQSize) + 1] = GQB[I_[self]]]
+                                               /\ TaskReadyAges' = [TaskReadyAges EXCEPT ![GQB[I_[self]].t_id] = 0]
                                                /\ UNCHANGED << GQB, K >>
                                           ELSE /\ K' = [K EXCEPT ![self] = K[self] + 1]
                                                /\ GQB' = [GQB EXCEPT ![K'[self]] = GQB[I_[self]]]
-                                               /\ UNCHANGED << GQA, GQALast >>
+                                               /\ UNCHANGED << GQA, GQALast, 
+                                                               TaskReadyAges >>
                                     /\ pc' = [pc EXCEPT ![self] = "GQ_Flush_Ready_Step"]
-                                    /\ UNCHANGED << GQAFirst, GQBSize, GQLock, 
-                                                    LQA, LQAClock, LQASizes, 
-                                                    LQB, LQBSizes, LQLocks, 
-                                                    TaskIdCurrent, 
+                                    /\ UNCHANGED << GQAFirst, GQBSize, 
+                                                    GQPPPointer, GQLock, LQA, 
+                                                    LQAClock, ClkCycles, 
+                                                    LQASizes, LQB, LQBSizes, 
+                                                    LQLocks, TaskIdCurrent, 
                                                     TasksFinished, RTStarted, 
                                                     RTStopped, Futures, 
                                                     FuturePush, FuturesBlocked, 
                                                     FutureWorkers, 
                                                     FDReadsAvailable, 
                                                     FDWritesAvailable, KQueues, 
-                                                    KContinueLock, 
-                                                    Worker_Wakeup, tid_, task, 
-                                                    HasWork, I_, J, L, kq_out, 
-                                                    current_time, lqbuf, wr, 
-                                                    tid, I, fildes_, Steps_, 
-                                                    fildes, Steps, PolledRead >>
+                                                    RoundRobinToken, tid_, 
+                                                    task, HasWork, I_, J, L, 
+                                                    kq_out, current_time, 
+                                                    lqbuf, wr, tid, I, fildes_, 
+                                                    Steps_, fildes, Steps, 
+                                                    PolledRead >>
 
 GQ_Flush_Ready_Step(self) == /\ pc[self] = "GQ_Flush_Ready_Step"
                              /\ I_' = [I_ EXCEPT ![self] = I_[self] + 1]
                              /\ pc' = [pc EXCEPT ![self] = "GQ_Flush_Ready"]
                              /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, 
-                                             GQBSize, GQLock, LQA, LQAClock, 
-                                             LQASizes, LQB, LQBSizes, LQLocks, 
+                                             GQBSize, GQPPPointer, GQLock, LQA, 
+                                             LQAClock, ClkCycles, LQASizes, 
+                                             LQB, LQBSizes, LQLocks, 
                                              TaskIdCurrent, TasksFinished, 
                                              RTStarted, RTStopped, Futures, 
                                              FuturePush, FuturesBlocked, 
                                              FutureWorkers, FDReadsAvailable, 
                                              FDWritesAvailable, KQueues, 
-                                             KContinueLock, Worker_Wakeup, 
+                                             TaskReadyAges, RoundRobinToken, 
                                              tid_, task, HasWork, J, K, L, 
                                              kq_out, current_time, lqbuf, wr, 
                                              tid, I, fildes_, Steps_, fildes, 
@@ -2142,14 +2869,15 @@ GQ_Flush_Ready_Done(self) == /\ pc[self] = "GQ_Flush_Ready_Done"
                              /\ K' = [K EXCEPT ![self] = 0]
                              /\ pc' = [pc EXCEPT ![self] = "AttemptEnqueueFromGlobalWhile"]
                              /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, 
-                                             GQLock, LQA, LQAClock, LQASizes, 
+                                             GQPPPointer, GQLock, LQA, 
+                                             LQAClock, ClkCycles, LQASizes, 
                                              LQB, LQBSizes, LQLocks, 
                                              TaskIdCurrent, TasksFinished, 
                                              RTStarted, RTStopped, Futures, 
                                              FuturePush, FuturesBlocked, 
                                              FutureWorkers, FDReadsAvailable, 
                                              FDWritesAvailable, KQueues, 
-                                             KContinueLock, Worker_Wakeup, 
+                                             TaskReadyAges, RoundRobinToken, 
                                              tid_, task, HasWork, J, L, kq_out, 
                                              current_time, lqbuf, wr, tid, I, 
                                              fildes_, Steps_, fildes, Steps, 
@@ -2164,10 +2892,11 @@ AttemptEnqueueFromGlobalWhile(self) == /\ pc[self] = "AttemptEnqueueFromGlobalWh
                                              ELSE /\ pc' = [pc EXCEPT ![self] = "UpdateGQAPointers"]
                                                   /\ UNCHANGED << LQA, I_, K >>
                                        /\ UNCHANGED << GQA, GQAFirst, GQALast, 
-                                                       GQB, GQBSize, GQLock, 
-                                                       LQAClock, LQASizes, LQB, 
-                                                       LQBSizes, LQLocks, 
-                                                       TaskIdCurrent, 
+                                                       GQB, GQBSize, 
+                                                       GQPPPointer, GQLock, 
+                                                       LQAClock, ClkCycles, 
+                                                       LQASizes, LQB, LQBSizes, 
+                                                       LQLocks, TaskIdCurrent, 
                                                        TasksFinished, 
                                                        RTStarted, RTStopped, 
                                                        Futures, FuturePush, 
@@ -2175,8 +2904,8 @@ AttemptEnqueueFromGlobalWhile(self) == /\ pc[self] = "AttemptEnqueueFromGlobalWh
                                                        FutureWorkers, 
                                                        FDReadsAvailable, 
                                                        FDWritesAvailable, 
-                                                       KQueues, KContinueLock, 
-                                                       Worker_Wakeup, tid_, 
+                                                       KQueues, TaskReadyAges, 
+                                                       RoundRobinToken, tid_, 
                                                        task, HasWork, J, L, 
                                                        kq_out, current_time, 
                                                        lqbuf, wr, tid, I, 
@@ -2186,36 +2915,39 @@ AttemptEnqueueFromGlobalWhile(self) == /\ pc[self] = "AttemptEnqueueFromGlobalWh
 UpdateGQAPointers(self) == /\ pc[self] = "UpdateGQAPointers"
                            /\ GQAFirst' = I_[self] - 1
                            /\ pc' = [pc EXCEPT ![self] = "UpdateGQAPointersCheck"]
-                           /\ UNCHANGED << GQA, GQALast, GQB, GQBSize, GQLock, 
-                                           LQA, LQAClock, LQASizes, LQB, 
-                                           LQBSizes, LQLocks, TaskIdCurrent, 
+                           /\ UNCHANGED << GQA, GQALast, GQB, GQBSize, 
+                                           GQPPPointer, GQLock, LQA, LQAClock, 
+                                           ClkCycles, LQASizes, LQB, LQBSizes, 
+                                           LQLocks, TaskIdCurrent, 
                                            TasksFinished, RTStarted, RTStopped, 
                                            Futures, FuturePush, FuturesBlocked, 
                                            FutureWorkers, FDReadsAvailable, 
                                            FDWritesAvailable, KQueues, 
-                                           KContinueLock, Worker_Wakeup, tid_, 
-                                           task, HasWork, I_, J, K, L, kq_out, 
-                                           current_time, lqbuf, wr, tid, I, 
-                                           fildes_, Steps_, fildes, Steps, 
-                                           PolledRead >>
+                                           TaskReadyAges, RoundRobinToken, 
+                                           tid_, task, HasWork, I_, J, K, L, 
+                                           kq_out, current_time, lqbuf, wr, 
+                                           tid, I, fildes_, Steps_, fildes, 
+                                           Steps, PolledRead >>
 
 UpdateGQAPointersCheck(self) == /\ pc[self] = "UpdateGQAPointersCheck"
                                 /\ IF GQAFirst > GQSize
                                       THEN /\ GQAFirst' = GQAFirst - GQSize
                                            /\ GQALast' = GQALast - GQSize
+                                           /\ GQPPPointer' = GQPPPointer - GQSize
                                       ELSE /\ TRUE
-                                           /\ UNCHANGED << GQAFirst, GQALast >>
+                                           /\ UNCHANGED << GQAFirst, GQALast, 
+                                                           GQPPPointer >>
                                 /\ pc' = [pc EXCEPT ![self] = "AttemptEnqueueFromGlobalFinish"]
                                 /\ UNCHANGED << GQA, GQB, GQBSize, GQLock, LQA, 
-                                                LQAClock, LQASizes, LQB, 
-                                                LQBSizes, LQLocks, 
+                                                LQAClock, ClkCycles, LQASizes, 
+                                                LQB, LQBSizes, LQLocks, 
                                                 TaskIdCurrent, TasksFinished, 
                                                 RTStarted, RTStopped, Futures, 
                                                 FuturePush, FuturesBlocked, 
                                                 FutureWorkers, 
                                                 FDReadsAvailable, 
                                                 FDWritesAvailable, KQueues, 
-                                                KContinueLock, Worker_Wakeup, 
+                                                TaskReadyAges, RoundRobinToken, 
                                                 tid_, task, HasWork, I_, J, K, 
                                                 L, kq_out, current_time, lqbuf, 
                                                 wr, tid, I, fildes_, Steps_, 
@@ -2227,9 +2959,10 @@ AttemptEnqueueFromGlobalFinish(self) == /\ pc[self] = "AttemptEnqueueFromGlobalF
                                         /\ LQLocks' = [LQLocks EXCEPT ![self] = NullLock]
                                         /\ pc' = [pc EXCEPT ![self] = "EnqueueFromGlobalCheck"]
                                         /\ UNCHANGED << GQA, GQAFirst, GQALast, 
-                                                        GQB, GQBSize, LQA, 
-                                                        LQAClock, LQB, 
-                                                        LQBSizes, 
+                                                        GQB, GQBSize, 
+                                                        GQPPPointer, LQA, 
+                                                        LQAClock, ClkCycles, 
+                                                        LQB, LQBSizes, 
                                                         TaskIdCurrent, 
                                                         TasksFinished, 
                                                         RTStarted, RTStopped, 
@@ -2238,8 +2971,8 @@ AttemptEnqueueFromGlobalFinish(self) == /\ pc[self] = "AttemptEnqueueFromGlobalF
                                                         FutureWorkers, 
                                                         FDReadsAvailable, 
                                                         FDWritesAvailable, 
-                                                        KQueues, KContinueLock, 
-                                                        Worker_Wakeup, tid_, 
+                                                        KQueues, TaskReadyAges, 
+                                                        RoundRobinToken, tid_, 
                                                         task, HasWork, I_, J, 
                                                         K, L, kq_out, 
                                                         current_time, lqbuf, 
@@ -2252,7 +2985,8 @@ EnqueueFromGlobalCheck(self) == /\ pc[self] = "EnqueueFromGlobalCheck"
                                       THEN /\ pc' = [pc EXCEPT ![self] = "Main_Loop"]
                                       ELSE /\ pc' = [pc EXCEPT ![self] = "WorkStealingBegin"]
                                 /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, 
-                                                GQBSize, GQLock, LQA, LQAClock, 
+                                                GQBSize, GQPPPointer, GQLock, 
+                                                LQA, LQAClock, ClkCycles, 
                                                 LQASizes, LQB, LQBSizes, 
                                                 LQLocks, TaskIdCurrent, 
                                                 TasksFinished, RTStarted, 
@@ -2260,7 +2994,7 @@ EnqueueFromGlobalCheck(self) == /\ pc[self] = "EnqueueFromGlobalCheck"
                                                 FuturesBlocked, FutureWorkers, 
                                                 FDReadsAvailable, 
                                                 FDWritesAvailable, KQueues, 
-                                                KContinueLock, Worker_Wakeup, 
+                                                TaskReadyAges, RoundRobinToken, 
                                                 tid_, task, HasWork, I_, J, K, 
                                                 L, kq_out, current_time, lqbuf, 
                                                 wr, tid, I, fildes_, Steps_, 
@@ -2270,18 +3004,18 @@ WorkStealingBegin(self) == /\ pc[self] = "WorkStealingBegin"
                            /\ I_' = [I_ EXCEPT ![self] = 1]
                            /\ pc' = [pc EXCEPT ![self] = "WorkStealingMainLoop"]
                            /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, 
-                                           GQBSize, GQLock, LQA, LQAClock, 
-                                           LQASizes, LQB, LQBSizes, LQLocks, 
-                                           TaskIdCurrent, TasksFinished, 
-                                           RTStarted, RTStopped, Futures, 
-                                           FuturePush, FuturesBlocked, 
+                                           GQBSize, GQPPPointer, GQLock, LQA, 
+                                           LQAClock, ClkCycles, LQASizes, LQB, 
+                                           LQBSizes, LQLocks, TaskIdCurrent, 
+                                           TasksFinished, RTStarted, RTStopped, 
+                                           Futures, FuturePush, FuturesBlocked, 
                                            FutureWorkers, FDReadsAvailable, 
                                            FDWritesAvailable, KQueues, 
-                                           KContinueLock, Worker_Wakeup, tid_, 
-                                           task, HasWork, J, K, L, kq_out, 
-                                           current_time, lqbuf, wr, tid, I, 
-                                           fildes_, Steps_, fildes, Steps, 
-                                           PolledRead >>
+                                           TaskReadyAges, RoundRobinToken, 
+                                           tid_, task, HasWork, J, K, L, 
+                                           kq_out, current_time, lqbuf, wr, 
+                                           tid, I, fildes_, Steps_, fildes, 
+                                           Steps, PolledRead >>
 
 WorkStealingMainLoop(self) == /\ pc[self] = "WorkStealingMainLoop"
                               /\ IF I_[self] <= NumWorkers
@@ -2292,14 +3026,15 @@ WorkStealingMainLoop(self) == /\ pc[self] = "WorkStealingMainLoop"
                                                           ELSE /\ pc' = [pc EXCEPT ![self] = "WorkStealingFinishedStolen"]
                                     ELSE /\ pc' = [pc EXCEPT ![self] = "No_Tasks"]
                               /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, 
-                                              GQBSize, GQLock, LQA, LQAClock, 
+                                              GQBSize, GQPPPointer, GQLock, 
+                                              LQA, LQAClock, ClkCycles, 
                                               LQASizes, LQB, LQBSizes, LQLocks, 
                                               TaskIdCurrent, TasksFinished, 
                                               RTStarted, RTStopped, Futures, 
                                               FuturePush, FuturesBlocked, 
                                               FutureWorkers, FDReadsAvailable, 
                                               FDWritesAvailable, KQueues, 
-                                              KContinueLock, Worker_Wakeup, 
+                                              TaskReadyAges, RoundRobinToken, 
                                               tid_, task, HasWork, I_, J, K, L, 
                                               kq_out, current_time, lqbuf, wr, 
                                               tid, I, fildes_, Steps_, fildes, 
@@ -2310,8 +3045,9 @@ WorkStealingFinishedStolen(self) == /\ pc[self] = "WorkStealingFinishedStolen"
                                           THEN /\ pc' = [pc EXCEPT ![self] = "Main_Loop"]
                                           ELSE /\ pc' = [pc EXCEPT ![self] = "WorkStealingLoopStep"]
                                     /\ UNCHANGED << GQA, GQAFirst, GQALast, 
-                                                    GQB, GQBSize, GQLock, LQA, 
-                                                    LQAClock, LQASizes, LQB, 
+                                                    GQB, GQBSize, GQPPPointer, 
+                                                    GQLock, LQA, LQAClock, 
+                                                    ClkCycles, LQASizes, LQB, 
                                                     LQBSizes, LQLocks, 
                                                     TaskIdCurrent, 
                                                     TasksFinished, RTStarted, 
@@ -2320,9 +3056,9 @@ WorkStealingFinishedStolen(self) == /\ pc[self] = "WorkStealingFinishedStolen"
                                                     FutureWorkers, 
                                                     FDReadsAvailable, 
                                                     FDWritesAvailable, KQueues, 
-                                                    KContinueLock, 
-                                                    Worker_Wakeup, tid_, task, 
-                                                    HasWork, I_, J, K, L, 
+                                                    TaskReadyAges, 
+                                                    RoundRobinToken, tid_, 
+                                                    task, HasWork, I_, J, K, L, 
                                                     kq_out, current_time, 
                                                     lqbuf, wr, tid, I, fildes_, 
                                                     Steps_, fildes, Steps, 
@@ -2332,14 +3068,15 @@ WorkStealingLoopStep(self) == /\ pc[self] = "WorkStealingLoopStep"
                               /\ I_' = [I_ EXCEPT ![self] = I_[self] + 1]
                               /\ pc' = [pc EXCEPT ![self] = "WorkStealingMainLoop"]
                               /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, 
-                                              GQBSize, GQLock, LQA, LQAClock, 
+                                              GQBSize, GQPPPointer, GQLock, 
+                                              LQA, LQAClock, ClkCycles, 
                                               LQASizes, LQB, LQBSizes, LQLocks, 
                                               TaskIdCurrent, TasksFinished, 
                                               RTStarted, RTStopped, Futures, 
                                               FuturePush, FuturesBlocked, 
                                               FutureWorkers, FDReadsAvailable, 
                                               FDWritesAvailable, KQueues, 
-                                              KContinueLock, Worker_Wakeup, 
+                                              TaskReadyAges, RoundRobinToken, 
                                               tid_, task, HasWork, J, K, L, 
                                               kq_out, current_time, lqbuf, wr, 
                                               tid, I, fildes_, Steps_, fildes, 
@@ -2350,8 +3087,9 @@ WorkStealingAcquireSelfLock(self) == /\ pc[self] = "WorkStealingAcquireSelfLock"
                                      /\ LQLocks' = [LQLocks EXCEPT ![self] = self]
                                      /\ pc' = [pc EXCEPT ![self] = "WorkStealingAcquireVictimLock"]
                                      /\ UNCHANGED << GQA, GQAFirst, GQALast, 
-                                                     GQB, GQBSize, GQLock, LQA, 
-                                                     LQAClock, LQASizes, LQB, 
+                                                     GQB, GQBSize, GQPPPointer, 
+                                                     GQLock, LQA, LQAClock, 
+                                                     ClkCycles, LQASizes, LQB, 
                                                      LQBSizes, TaskIdCurrent, 
                                                      TasksFinished, RTStarted, 
                                                      RTStopped, Futures, 
@@ -2360,10 +3098,10 @@ WorkStealingAcquireSelfLock(self) == /\ pc[self] = "WorkStealingAcquireSelfLock"
                                                      FutureWorkers, 
                                                      FDReadsAvailable, 
                                                      FDWritesAvailable, 
-                                                     KQueues, KContinueLock, 
-                                                     Worker_Wakeup, tid_, task, 
-                                                     HasWork, I_, J, K, L, 
-                                                     kq_out, current_time, 
+                                                     KQueues, TaskReadyAges, 
+                                                     RoundRobinToken, tid_, 
+                                                     task, HasWork, I_, J, K, 
+                                                     L, kq_out, current_time, 
                                                      lqbuf, wr, tid, I, 
                                                      fildes_, Steps_, fildes, 
                                                      Steps, PolledRead >>
@@ -2373,8 +3111,10 @@ WorkStealingAcquireVictimLock(self) == /\ pc[self] = "WorkStealingAcquireVictimL
                                        /\ LQLocks' = [LQLocks EXCEPT ![I_[self]] = self]
                                        /\ pc' = [pc EXCEPT ![self] = "WorkstealingCheck1"]
                                        /\ UNCHANGED << GQA, GQAFirst, GQALast, 
-                                                       GQB, GQBSize, GQLock, 
-                                                       LQA, LQAClock, LQASizes, 
+                                                       GQB, GQBSize, 
+                                                       GQPPPointer, GQLock, 
+                                                       LQA, LQAClock, 
+                                                       ClkCycles, LQASizes, 
                                                        LQB, LQBSizes, 
                                                        TaskIdCurrent, 
                                                        TasksFinished, 
@@ -2384,8 +3124,8 @@ WorkStealingAcquireVictimLock(self) == /\ pc[self] = "WorkStealingAcquireVictimL
                                                        FutureWorkers, 
                                                        FDReadsAvailable, 
                                                        FDWritesAvailable, 
-                                                       KQueues, KContinueLock, 
-                                                       Worker_Wakeup, tid_, 
+                                                       KQueues, TaskReadyAges, 
+                                                       RoundRobinToken, tid_, 
                                                        task, HasWork, I_, J, K, 
                                                        L, kq_out, current_time, 
                                                        lqbuf, wr, tid, I, 
@@ -2397,33 +3137,34 @@ WorkstealingCheck1(self) == /\ pc[self] = "WorkstealingCheck1"
                                   THEN /\ pc' = [pc EXCEPT ![self] = "WorkStealingFinishedStolen1"]
                                   ELSE /\ pc' = [pc EXCEPT ![self] = "WorkStealingCont1"]
                             /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, 
-                                            GQBSize, GQLock, LQA, LQAClock, 
-                                            LQASizes, LQB, LQBSizes, LQLocks, 
-                                            TaskIdCurrent, TasksFinished, 
-                                            RTStarted, RTStopped, Futures, 
-                                            FuturePush, FuturesBlocked, 
-                                            FutureWorkers, FDReadsAvailable, 
+                                            GQBSize, GQPPPointer, GQLock, LQA, 
+                                            LQAClock, ClkCycles, LQASizes, LQB, 
+                                            LQBSizes, LQLocks, TaskIdCurrent, 
+                                            TasksFinished, RTStarted, 
+                                            RTStopped, Futures, FuturePush, 
+                                            FuturesBlocked, FutureWorkers, 
+                                            FDReadsAvailable, 
                                             FDWritesAvailable, KQueues, 
-                                            KContinueLock, Worker_Wakeup, tid_, 
-                                            task, HasWork, I_, J, K, L, kq_out, 
-                                            current_time, lqbuf, wr, tid, I, 
-                                            fildes_, Steps_, fildes, Steps, 
-                                            PolledRead >>
+                                            TaskReadyAges, RoundRobinToken, 
+                                            tid_, task, HasWork, I_, J, K, L, 
+                                            kq_out, current_time, lqbuf, wr, 
+                                            tid, I, fildes_, Steps_, fildes, 
+                                            Steps, PolledRead >>
 
 WorkStealingCont1(self) == /\ pc[self] = "WorkStealingCont1"
                            /\ J' = [J EXCEPT ![self] = LQAClock[I_[self]] + 1]
                            /\ K' = [K EXCEPT ![self] = 0]
                            /\ pc' = [pc EXCEPT ![self] = "WorkstealingSteal"]
                            /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, 
-                                           GQBSize, GQLock, LQA, LQAClock, 
-                                           LQASizes, LQB, LQBSizes, LQLocks, 
-                                           TaskIdCurrent, TasksFinished, 
-                                           RTStarted, RTStopped, Futures, 
-                                           FuturePush, FuturesBlocked, 
+                                           GQBSize, GQPPPointer, GQLock, LQA, 
+                                           LQAClock, ClkCycles, LQASizes, LQB, 
+                                           LQBSizes, LQLocks, TaskIdCurrent, 
+                                           TasksFinished, RTStarted, RTStopped, 
+                                           Futures, FuturePush, FuturesBlocked, 
                                            FutureWorkers, FDReadsAvailable, 
                                            FDWritesAvailable, KQueues, 
-                                           KContinueLock, Worker_Wakeup, tid_, 
-                                           task, HasWork, I_, L, kq_out, 
+                                           TaskReadyAges, RoundRobinToken, 
+                                           tid_, task, HasWork, I_, L, kq_out, 
                                            current_time, lqbuf, wr, tid, I, 
                                            fildes_, Steps_, fildes, Steps, 
                                            PolledRead >>
@@ -2441,18 +3182,18 @@ WorkstealingSteal(self) == /\ pc[self] = "WorkstealingSteal"
                                  ELSE /\ pc' = [pc EXCEPT ![self] = "WorkStealingFinishedStolen1"]
                                       /\ UNCHANGED << LQA, K >>
                            /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, 
-                                           GQBSize, GQLock, LQAClock, LQASizes, 
-                                           LQB, LQBSizes, LQLocks, 
-                                           TaskIdCurrent, TasksFinished, 
-                                           RTStarted, RTStopped, Futures, 
-                                           FuturePush, FuturesBlocked, 
+                                           GQBSize, GQPPPointer, GQLock, 
+                                           LQAClock, ClkCycles, LQASizes, LQB, 
+                                           LQBSizes, LQLocks, TaskIdCurrent, 
+                                           TasksFinished, RTStarted, RTStopped, 
+                                           Futures, FuturePush, FuturesBlocked, 
                                            FutureWorkers, FDReadsAvailable, 
                                            FDWritesAvailable, KQueues, 
-                                           KContinueLock, Worker_Wakeup, tid_, 
-                                           task, HasWork, I_, J, L, kq_out, 
-                                           current_time, lqbuf, wr, tid, I, 
-                                           fildes_, Steps_, fildes, Steps, 
-                                           PolledRead >>
+                                           TaskReadyAges, RoundRobinToken, 
+                                           tid_, task, HasWork, I_, J, L, 
+                                           kq_out, current_time, lqbuf, wr, 
+                                           tid, I, fildes_, Steps_, fildes, 
+                                           Steps, PolledRead >>
 
 WorkStealingFinishedStolen1(self) == /\ pc[self] = "WorkStealingFinishedStolen1"
                                      /\ LQLocks' = [LQLocks EXCEPT ![I_[self]] = NullLock, ![self] = NullLock]
@@ -2460,7 +3201,8 @@ WorkStealingFinishedStolen1(self) == /\ pc[self] = "WorkStealingFinishedStolen1"
                                      /\ LQAClock' = [LQAClock EXCEPT ![self] = K[self] + 1]
                                      /\ pc' = [pc EXCEPT ![self] = "WorkStealingFinishedStolen"]
                                      /\ UNCHANGED << GQA, GQAFirst, GQALast, 
-                                                     GQB, GQBSize, GQLock, LQA, 
+                                                     GQB, GQBSize, GQPPPointer, 
+                                                     GQLock, LQA, ClkCycles, 
                                                      LQB, LQBSizes, 
                                                      TaskIdCurrent, 
                                                      TasksFinished, RTStarted, 
@@ -2470,10 +3212,10 @@ WorkStealingFinishedStolen1(self) == /\ pc[self] = "WorkStealingFinishedStolen1"
                                                      FutureWorkers, 
                                                      FDReadsAvailable, 
                                                      FDWritesAvailable, 
-                                                     KQueues, KContinueLock, 
-                                                     Worker_Wakeup, tid_, task, 
-                                                     HasWork, I_, J, K, L, 
-                                                     kq_out, current_time, 
+                                                     KQueues, TaskReadyAges, 
+                                                     RoundRobinToken, tid_, 
+                                                     task, HasWork, I_, J, K, 
+                                                     L, kq_out, current_time, 
                                                      lqbuf, wr, tid, I, 
                                                      fildes_, Steps_, fildes, 
                                                      Steps, PolledRead >>
@@ -2483,10 +3225,11 @@ WorkStealingAcquireVictimLock2(self) == /\ pc[self] = "WorkStealingAcquireVictim
                                         /\ LQLocks' = [LQLocks EXCEPT ![I_[self]] = self]
                                         /\ pc' = [pc EXCEPT ![self] = "WorkstealingCheck2"]
                                         /\ UNCHANGED << GQA, GQAFirst, GQALast, 
-                                                        GQB, GQBSize, GQLock, 
+                                                        GQB, GQBSize, 
+                                                        GQPPPointer, GQLock, 
                                                         LQA, LQAClock, 
-                                                        LQASizes, LQB, 
-                                                        LQBSizes, 
+                                                        ClkCycles, LQASizes, 
+                                                        LQB, LQBSizes, 
                                                         TaskIdCurrent, 
                                                         TasksFinished, 
                                                         RTStarted, RTStopped, 
@@ -2495,8 +3238,8 @@ WorkStealingAcquireVictimLock2(self) == /\ pc[self] = "WorkStealingAcquireVictim
                                                         FutureWorkers, 
                                                         FDReadsAvailable, 
                                                         FDWritesAvailable, 
-                                                        KQueues, KContinueLock, 
-                                                        Worker_Wakeup, tid_, 
+                                                        KQueues, TaskReadyAges, 
+                                                        RoundRobinToken, tid_, 
                                                         task, HasWork, I_, J, 
                                                         K, L, kq_out, 
                                                         current_time, lqbuf, 
@@ -2509,33 +3252,34 @@ WorkstealingCheck2(self) == /\ pc[self] = "WorkstealingCheck2"
                                   THEN /\ pc' = [pc EXCEPT ![self] = "WorkStealingUnlockVictimLock2"]
                                   ELSE /\ pc' = [pc EXCEPT ![self] = "WorkStealingCont2"]
                             /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, 
-                                            GQBSize, GQLock, LQA, LQAClock, 
-                                            LQASizes, LQB, LQBSizes, LQLocks, 
-                                            TaskIdCurrent, TasksFinished, 
-                                            RTStarted, RTStopped, Futures, 
-                                            FuturePush, FuturesBlocked, 
-                                            FutureWorkers, FDReadsAvailable, 
+                                            GQBSize, GQPPPointer, GQLock, LQA, 
+                                            LQAClock, ClkCycles, LQASizes, LQB, 
+                                            LQBSizes, LQLocks, TaskIdCurrent, 
+                                            TasksFinished, RTStarted, 
+                                            RTStopped, Futures, FuturePush, 
+                                            FuturesBlocked, FutureWorkers, 
+                                            FDReadsAvailable, 
                                             FDWritesAvailable, KQueues, 
-                                            KContinueLock, Worker_Wakeup, tid_, 
-                                            task, HasWork, I_, J, K, L, kq_out, 
-                                            current_time, lqbuf, wr, tid, I, 
-                                            fildes_, Steps_, fildes, Steps, 
-                                            PolledRead >>
+                                            TaskReadyAges, RoundRobinToken, 
+                                            tid_, task, HasWork, I_, J, K, L, 
+                                            kq_out, current_time, lqbuf, wr, 
+                                            tid, I, fildes_, Steps_, fildes, 
+                                            Steps, PolledRead >>
 
 WorkStealingCont2(self) == /\ pc[self] = "WorkStealingCont2"
                            /\ J' = [J EXCEPT ![self] = LQAClock[I_[self]] + 1]
                            /\ K' = [K EXCEPT ![self] = 0]
                            /\ pc' = [pc EXCEPT ![self] = "WorkstealingSteal2"]
                            /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, 
-                                           GQBSize, GQLock, LQA, LQAClock, 
-                                           LQASizes, LQB, LQBSizes, LQLocks, 
-                                           TaskIdCurrent, TasksFinished, 
-                                           RTStarted, RTStopped, Futures, 
-                                           FuturePush, FuturesBlocked, 
+                                           GQBSize, GQPPPointer, GQLock, LQA, 
+                                           LQAClock, ClkCycles, LQASizes, LQB, 
+                                           LQBSizes, LQLocks, TaskIdCurrent, 
+                                           TasksFinished, RTStarted, RTStopped, 
+                                           Futures, FuturePush, FuturesBlocked, 
                                            FutureWorkers, FDReadsAvailable, 
                                            FDWritesAvailable, KQueues, 
-                                           KContinueLock, Worker_Wakeup, tid_, 
-                                           task, HasWork, I_, L, kq_out, 
+                                           TaskReadyAges, RoundRobinToken, 
+                                           tid_, task, HasWork, I_, L, kq_out, 
                                            current_time, lqbuf, wr, tid, I, 
                                            fildes_, Steps_, fildes, Steps, 
                                            PolledRead >>
@@ -2555,26 +3299,31 @@ WorkstealingSteal2(self) == /\ pc[self] = "WorkstealingSteal2"
                                   ELSE /\ pc' = [pc EXCEPT ![self] = "WorkStealingUnlockVictimLock2"]
                                        /\ UNCHANGED << LQA, K, lqbuf >>
                             /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, 
-                                            GQBSize, GQLock, LQAClock, 
-                                            LQASizes, LQB, LQBSizes, LQLocks, 
-                                            TaskIdCurrent, TasksFinished, 
-                                            RTStarted, RTStopped, Futures, 
-                                            FuturePush, FuturesBlocked, 
-                                            FutureWorkers, FDReadsAvailable, 
+                                            GQBSize, GQPPPointer, GQLock, 
+                                            LQAClock, ClkCycles, LQASizes, LQB, 
+                                            LQBSizes, LQLocks, TaskIdCurrent, 
+                                            TasksFinished, RTStarted, 
+                                            RTStopped, Futures, FuturePush, 
+                                            FuturesBlocked, FutureWorkers, 
+                                            FDReadsAvailable, 
                                             FDWritesAvailable, KQueues, 
-                                            KContinueLock, Worker_Wakeup, tid_, 
-                                            task, HasWork, I_, J, L, kq_out, 
-                                            current_time, wr, tid, I, fildes_, 
-                                            Steps_, fildes, Steps, PolledRead >>
+                                            TaskReadyAges, RoundRobinToken, 
+                                            tid_, task, HasWork, I_, J, L, 
+                                            kq_out, current_time, wr, tid, I, 
+                                            fildes_, Steps_, fildes, Steps, 
+                                            PolledRead >>
 
 WorkStealingUnlockVictimLock2(self) == /\ pc[self] = "WorkStealingUnlockVictimLock2"
                                        /\ LQLocks' = [LQLocks EXCEPT ![I_[self]] = NullLock]
-                                       /\ pc' = [pc EXCEPT ![self] = "WorkStealing2MoveToSelf"]
+                                       /\ LQA' = [LQA EXCEPT ![self] = lqbuf[self]]
+                                       /\ LQASizes' = [LQASizes EXCEPT ![self] = K[self]]
+                                       /\ LQAClock' = [LQAClock EXCEPT ![self] = K[self] + 1]
+                                       /\ pc' = [pc EXCEPT ![self] = "WorkStealingFinishedStolen"]
                                        /\ UNCHANGED << GQA, GQAFirst, GQALast, 
-                                                       GQB, GQBSize, GQLock, 
-                                                       LQA, LQAClock, LQASizes, 
-                                                       LQB, LQBSizes, 
-                                                       TaskIdCurrent, 
+                                                       GQB, GQBSize, 
+                                                       GQPPPointer, GQLock, 
+                                                       ClkCycles, LQB, 
+                                                       LQBSizes, TaskIdCurrent, 
                                                        TasksFinished, 
                                                        RTStarted, RTStopped, 
                                                        Futures, FuturePush, 
@@ -2582,44 +3331,24 @@ WorkStealingUnlockVictimLock2(self) == /\ pc[self] = "WorkStealingUnlockVictimLo
                                                        FutureWorkers, 
                                                        FDReadsAvailable, 
                                                        FDWritesAvailable, 
-                                                       KQueues, KContinueLock, 
-                                                       Worker_Wakeup, tid_, 
+                                                       KQueues, TaskReadyAges, 
+                                                       RoundRobinToken, tid_, 
                                                        task, HasWork, I_, J, K, 
                                                        L, kq_out, current_time, 
                                                        lqbuf, wr, tid, I, 
                                                        fildes_, Steps_, fildes, 
                                                        Steps, PolledRead >>
 
-WorkStealing2MoveToSelf(self) == /\ pc[self] = "WorkStealing2MoveToSelf"
-                                 /\ LQA' = [LQA EXCEPT ![self] = lqbuf[self]]
-                                 /\ LQASizes' = [LQASizes EXCEPT ![self] = K[self]]
-                                 /\ LQAClock' = [LQAClock EXCEPT ![self] = K[self] + 1]
-                                 /\ pc' = [pc EXCEPT ![self] = "WorkStealingFinishedStolen"]
-                                 /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, 
-                                                 GQBSize, GQLock, LQB, 
-                                                 LQBSizes, LQLocks, 
-                                                 TaskIdCurrent, TasksFinished, 
-                                                 RTStarted, RTStopped, Futures, 
-                                                 FuturePush, FuturesBlocked, 
-                                                 FutureWorkers, 
-                                                 FDReadsAvailable, 
-                                                 FDWritesAvailable, KQueues, 
-                                                 KContinueLock, Worker_Wakeup, 
-                                                 tid_, task, HasWork, I_, J, K, 
-                                                 L, kq_out, current_time, 
-                                                 lqbuf, wr, tid, I, fildes_, 
-                                                 Steps_, fildes, Steps, 
-                                                 PolledRead >>
-
 No_Tasks(self) == /\ pc[self] = "No_Tasks"
                   /\ pc' = [pc EXCEPT ![self] = "Main_Loop"]
-                  /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, GQLock, 
-                                  LQA, LQAClock, LQASizes, LQB, LQBSizes, 
-                                  LQLocks, TaskIdCurrent, TasksFinished, 
-                                  RTStarted, RTStopped, Futures, FuturePush, 
+                  /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
+                                  GQPPPointer, GQLock, LQA, LQAClock, 
+                                  ClkCycles, LQASizes, LQB, LQBSizes, LQLocks, 
+                                  TaskIdCurrent, TasksFinished, RTStarted, 
+                                  RTStopped, Futures, FuturePush, 
                                   FuturesBlocked, FutureWorkers, 
                                   FDReadsAvailable, FDWritesAvailable, KQueues, 
-                                  KContinueLock, Worker_Wakeup, tid_, task, 
+                                  TaskReadyAges, RoundRobinToken, tid_, task, 
                                   HasWork, I_, J, K, L, kq_out, current_time, 
                                   lqbuf, wr, tid, I, fildes_, Steps_, fildes, 
                                   Steps, PolledRead >>
@@ -2629,73 +3358,119 @@ Has_Work_Loop(self) == /\ pc[self] = "Has_Work_Loop"
                              THEN /\ pc' = [pc EXCEPT ![self] = "DoFuturePoll"]
                              ELSE /\ pc' = [pc EXCEPT ![self] = "Main_Loop"]
                        /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
-                                       GQLock, LQA, LQAClock, LQASizes, LQB, 
-                                       LQBSizes, LQLocks, TaskIdCurrent, 
-                                       TasksFinished, RTStarted, RTStopped, 
-                                       Futures, FuturePush, FuturesBlocked, 
+                                       GQPPPointer, GQLock, LQA, LQAClock, 
+                                       ClkCycles, LQASizes, LQB, LQBSizes, 
+                                       LQLocks, TaskIdCurrent, TasksFinished, 
+                                       RTStarted, RTStopped, Futures, 
+                                       FuturePush, FuturesBlocked, 
                                        FutureWorkers, FDReadsAvailable, 
                                        FDWritesAvailable, KQueues, 
-                                       KContinueLock, Worker_Wakeup, tid_, 
+                                       TaskReadyAges, RoundRobinToken, tid_, 
                                        task, HasWork, I_, J, K, L, kq_out, 
                                        current_time, lqbuf, wr, tid, I, 
                                        fildes_, Steps_, fildes, Steps, 
                                        PolledRead >>
 
 DoFuturePoll(self) == /\ pc[self] = "DoFuturePoll"
+                      /\ RoundRobinToken = self
+                      /\ TaskReadyAges' = [x \in DOMAIN TaskReadyAges |-> IF TaskReadyAges[x] = NullTRA THEN NullTRA ELSE TaskReadyAges[x] + 1]
+                      /\ RoundRobinToken' = (IF self + 1 \in Workers THEN self + 1 ELSE 1)
                       /\ FutureWorkers' = [FutureWorkers EXCEPT ![task[self].future] = self]
                       /\ FuturesBlocked' = [FuturesBlocked EXCEPT ![task[self].future] = NullFB]
                       /\ Futures' = [Futures EXCEPT ![task[self].future] = FSPolling]
                       /\ pc' = [pc EXCEPT ![self] = "ProcessStatus"]
                       /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
-                                      GQLock, LQA, LQAClock, LQASizes, LQB, 
-                                      LQBSizes, LQLocks, TaskIdCurrent, 
-                                      TasksFinished, RTStarted, RTStopped, 
-                                      FuturePush, FDReadsAvailable, 
-                                      FDWritesAvailable, KQueues, 
-                                      KContinueLock, Worker_Wakeup, tid_, task, 
-                                      HasWork, I_, J, K, L, kq_out, 
-                                      current_time, lqbuf, wr, tid, I, fildes_, 
-                                      Steps_, fildes, Steps, PolledRead >>
+                                      GQPPPointer, GQLock, LQA, LQAClock, 
+                                      ClkCycles, LQASizes, LQB, LQBSizes, 
+                                      LQLocks, TaskIdCurrent, TasksFinished, 
+                                      RTStarted, RTStopped, FuturePush, 
+                                      FDReadsAvailable, FDWritesAvailable, 
+                                      KQueues, tid_, task, HasWork, I_, J, K, 
+                                      L, kq_out, current_time, lqbuf, wr, tid, 
+                                      I, fildes_, Steps_, fildes, Steps, 
+                                      PolledRead >>
 
 ProcessStatus(self) == /\ pc[self] = "ProcessStatus"
                        /\ Futures[task[self].future] # FSPolling
-                       /\ IF Futures[task[self].future] = FSReturned
-                             THEN /\ IF FuturesBlocked[task[self].future] # NullFB
-                                        THEN /\ IF FuturesBlocked[task[self].future].kind \in {FBKindRead, FBKindWrite}
-                                                   THEN /\ LQA' = [LQA EXCEPT ![self][LQAClock[self]] = [LQA[self][LQAClock[self]] EXCEPT !.state = TSBIO, !.blocked_io_info = [fd |-> FuturesBlocked[task[self].future].fd, ty |-> FuturesBlocked[task[self].future].kind, data |-> 0, eof |-> FALSE]]]
-                                                   ELSE /\ IF FuturesBlocked[task[self].future].kind = FBKindTimer
-                                                              THEN /\ LQA' = [LQA EXCEPT ![self][LQAClock[self]] = [LQA[self][LQAClock[self]] EXCEPT !.state = TSBTimer]]
-                                                              ELSE /\ TRUE
-                                                                   /\ LQA' = LQA
-                                        ELSE /\ LQA' = [LQA EXCEPT ![self][LQAClock[self]].state = TSReady]
-                                  /\ UNCHANGED TasksFinished
-                             ELSE /\ LQA' = [LQA EXCEPT ![self][LQAClock[self]] = NullTask]
-                                  /\ TasksFinished' = TasksFinished + 1
-                       /\ pc' = [pc EXCEPT ![self] = "LQ_Lock2"]
+                       /\ pc' = [pc EXCEPT ![self] = "ProcessStatusInLQ"]
                        /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
-                                       GQLock, LQAClock, LQASizes, LQB, 
-                                       LQBSizes, LQLocks, TaskIdCurrent, 
+                                       GQPPPointer, GQLock, LQA, LQAClock, 
+                                       ClkCycles, LQASizes, LQB, LQBSizes, 
+                                       LQLocks, TaskIdCurrent, TasksFinished, 
                                        RTStarted, RTStopped, Futures, 
                                        FuturePush, FuturesBlocked, 
                                        FutureWorkers, FDReadsAvailable, 
                                        FDWritesAvailable, KQueues, 
-                                       KContinueLock, Worker_Wakeup, tid_, 
+                                       TaskReadyAges, RoundRobinToken, tid_, 
                                        task, HasWork, I_, J, K, L, kq_out, 
                                        current_time, lqbuf, wr, tid, I, 
                                        fildes_, Steps_, fildes, Steps, 
                                        PolledRead >>
 
+ProcessStatusInLQ(self) == /\ pc[self] = "ProcessStatusInLQ"
+                           /\ LQLocks[self] = NullLock
+                           /\ LQLocks' = [LQLocks EXCEPT ![self] = self]
+                           /\ IF Futures[task[self].future] = FSReturned
+                                 THEN /\ IF FuturesBlocked[task[self].future] # NullFB
+                                            THEN /\ IF FuturesBlocked[task[self].future].kind \in {FBKindRead, FBKindWrite}
+                                                       THEN /\ LQA' = [LQA EXCEPT ![self][LQAClock[self]] = [LQA[self][LQAClock[self]] EXCEPT !.state = TSBIO, !.blocked_io_info = [fd |-> FuturesBlocked[task[self].future].fd, ty |-> FuturesBlocked[task[self].future].kind, data |-> 0, eof |-> FALSE]]]
+                                                            /\ TaskReadyAges' = [TaskReadyAges EXCEPT ![LQA'[self][LQAClock[self]].t_id] = NullTRA]
+                                                       ELSE /\ IF FuturesBlocked[task[self].future].kind = FBKindTimer
+                                                                  THEN /\ LQA' = [LQA EXCEPT ![self][LQAClock[self]] = [LQA[self][LQAClock[self]] EXCEPT !.state = TSBTimer]]
+                                                                       /\ TaskReadyAges' = [TaskReadyAges EXCEPT ![LQA'[self][LQAClock[self]].t_id] = NullTRA]
+                                                                  ELSE /\ TRUE
+                                                                       /\ UNCHANGED << LQA, 
+                                                                                       TaskReadyAges >>
+                                            ELSE /\ LQA' = [LQA EXCEPT ![self][LQAClock[self]].state = TSReady]
+                                                 /\ TaskReadyAges' = [TaskReadyAges EXCEPT ![LQA'[self][LQAClock[self]].t_id] = 0]
+                                      /\ UNCHANGED TasksFinished
+                                 ELSE /\ TaskReadyAges' = [TaskReadyAges EXCEPT ![LQA[self][LQAClock[self]].t_id] = NullTRA]
+                                      /\ LQA' = [LQA EXCEPT ![self][LQAClock[self]] = NullTask]
+                                      /\ TasksFinished' = TasksFinished + 1
+                           /\ pc' = [pc EXCEPT ![self] = "LQ_Unlock_AfterProc"]
+                           /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, 
+                                           GQBSize, GQPPPointer, GQLock, 
+                                           LQAClock, ClkCycles, LQASizes, LQB, 
+                                           LQBSizes, TaskIdCurrent, RTStarted, 
+                                           RTStopped, Futures, FuturePush, 
+                                           FuturesBlocked, FutureWorkers, 
+                                           FDReadsAvailable, FDWritesAvailable, 
+                                           KQueues, RoundRobinToken, tid_, 
+                                           task, HasWork, I_, J, K, L, kq_out, 
+                                           current_time, lqbuf, wr, tid, I, 
+                                           fildes_, Steps_, fildes, Steps, 
+                                           PolledRead >>
+
+LQ_Unlock_AfterProc(self) == /\ pc[self] = "LQ_Unlock_AfterProc"
+                             /\ LQLocks' = [LQLocks EXCEPT ![self] = NullLock]
+                             /\ pc' = [pc EXCEPT ![self] = "LQ_Lock2"]
+                             /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, 
+                                             GQBSize, GQPPPointer, GQLock, LQA, 
+                                             LQAClock, ClkCycles, LQASizes, 
+                                             LQB, LQBSizes, TaskIdCurrent, 
+                                             TasksFinished, RTStarted, 
+                                             RTStopped, Futures, FuturePush, 
+                                             FuturesBlocked, FutureWorkers, 
+                                             FDReadsAvailable, 
+                                             FDWritesAvailable, KQueues, 
+                                             TaskReadyAges, RoundRobinToken, 
+                                             tid_, task, HasWork, I_, J, K, L, 
+                                             kq_out, current_time, lqbuf, wr, 
+                                             tid, I, fildes_, Steps_, fildes, 
+                                             Steps, PolledRead >>
+
 LQ_Lock2(self) == /\ pc[self] = "LQ_Lock2"
                   /\ LQLocks[self] = NullLock
                   /\ LQLocks' = [LQLocks EXCEPT ![self] = self]
                   /\ pc' = [pc EXCEPT ![self] = "LQ_Pull2"]
-                  /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, GQLock, 
-                                  LQA, LQAClock, LQASizes, LQB, LQBSizes, 
+                  /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
+                                  GQPPPointer, GQLock, LQA, LQAClock, 
+                                  ClkCycles, LQASizes, LQB, LQBSizes, 
                                   TaskIdCurrent, TasksFinished, RTStarted, 
                                   RTStopped, Futures, FuturePush, 
                                   FuturesBlocked, FutureWorkers, 
                                   FDReadsAvailable, FDWritesAvailable, KQueues, 
-                                  KContinueLock, Worker_Wakeup, tid_, task, 
+                                  TaskReadyAges, RoundRobinToken, tid_, task, 
                                   HasWork, I_, J, K, L, kq_out, current_time, 
                                   lqbuf, wr, tid, I, fildes_, Steps_, fildes, 
                                   Steps, PolledRead >>
@@ -2704,13 +3479,14 @@ LQ_Pull2(self) == /\ pc[self] = "LQ_Pull2"
                   /\ IF LQASizes[self] = 0
                         THEN /\ pc' = [pc EXCEPT ![self] = "LQ_Pull_Empty2"]
                         ELSE /\ pc' = [pc EXCEPT ![self] = "UpdateLQAClock2"]
-                  /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, GQLock, 
-                                  LQA, LQAClock, LQASizes, LQB, LQBSizes, 
-                                  LQLocks, TaskIdCurrent, TasksFinished, 
-                                  RTStarted, RTStopped, Futures, FuturePush, 
+                  /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
+                                  GQPPPointer, GQLock, LQA, LQAClock, 
+                                  ClkCycles, LQASizes, LQB, LQBSizes, LQLocks, 
+                                  TaskIdCurrent, TasksFinished, RTStarted, 
+                                  RTStopped, Futures, FuturePush, 
                                   FuturesBlocked, FutureWorkers, 
                                   FDReadsAvailable, FDWritesAvailable, KQueues, 
-                                  KContinueLock, Worker_Wakeup, tid_, task, 
+                                  TaskReadyAges, RoundRobinToken, tid_, task, 
                                   HasWork, I_, J, K, L, kq_out, current_time, 
                                   lqbuf, wr, tid, I, fildes_, Steps_, fildes, 
                                   Steps, PolledRead >>
@@ -2719,13 +3495,14 @@ LQ_Pull_Empty2(self) == /\ pc[self] = "LQ_Pull_Empty2"
                         /\ HasWork' = [HasWork EXCEPT ![self] = FALSE]
                         /\ pc' = [pc EXCEPT ![self] = "LQ_Unlock2"]
                         /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
-                                        GQLock, LQA, LQAClock, LQASizes, LQB, 
-                                        LQBSizes, LQLocks, TaskIdCurrent, 
-                                        TasksFinished, RTStarted, RTStopped, 
-                                        Futures, FuturePush, FuturesBlocked, 
+                                        GQPPPointer, GQLock, LQA, LQAClock, 
+                                        ClkCycles, LQASizes, LQB, LQBSizes, 
+                                        LQLocks, TaskIdCurrent, TasksFinished, 
+                                        RTStarted, RTStopped, Futures, 
+                                        FuturePush, FuturesBlocked, 
                                         FutureWorkers, FDReadsAvailable, 
                                         FDWritesAvailable, KQueues, 
-                                        KContinueLock, Worker_Wakeup, tid_, 
+                                        TaskReadyAges, RoundRobinToken, tid_, 
                                         task, I_, J, K, L, kq_out, 
                                         current_time, lqbuf, wr, tid, I, 
                                         fildes_, Steps_, fildes, Steps, 
@@ -2739,13 +3516,14 @@ UpdateLQAClock2(self) == /\ pc[self] = "UpdateLQAClock2"
                                ELSE /\ pc' = [pc EXCEPT ![self] = "IncrementLQAClocK2"]
                                     /\ UNCHANGED << LQLocks, HasWork >>
                          /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
-                                         GQLock, LQA, LQAClock, LQASizes, LQB, 
-                                         LQBSizes, TaskIdCurrent, 
-                                         TasksFinished, RTStarted, RTStopped, 
-                                         Futures, FuturePush, FuturesBlocked, 
+                                         GQPPPointer, GQLock, LQA, LQAClock, 
+                                         ClkCycles, LQASizes, LQB, LQBSizes, 
+                                         TaskIdCurrent, TasksFinished, 
+                                         RTStarted, RTStopped, Futures, 
+                                         FuturePush, FuturesBlocked, 
                                          FutureWorkers, FDReadsAvailable, 
                                          FDWritesAvailable, KQueues, 
-                                         KContinueLock, Worker_Wakeup, tid_, 
+                                         TaskReadyAges, RoundRobinToken, tid_, 
                                          task, I_, J, K, L, kq_out, 
                                          current_time, lqbuf, wr, tid, I, 
                                          fildes_, Steps_, fildes, Steps, 
@@ -2758,28 +3536,31 @@ IncrementLQAClocK2(self) == /\ pc[self] = "IncrementLQAClocK2"
                             /\ HasWork' = [HasWork EXCEPT ![self] = TRUE]
                             /\ pc' = [pc EXCEPT ![self] = "LQ_Unlock2"]
                             /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, 
-                                            GQBSize, GQLock, LQASizes, LQB, 
-                                            LQBSizes, LQLocks, TaskIdCurrent, 
+                                            GQBSize, GQPPPointer, GQLock, 
+                                            ClkCycles, LQASizes, LQB, LQBSizes, 
+                                            LQLocks, TaskIdCurrent, 
                                             TasksFinished, RTStarted, 
                                             RTStopped, Futures, FuturePush, 
                                             FuturesBlocked, FutureWorkers, 
                                             FDReadsAvailable, 
                                             FDWritesAvailable, KQueues, 
-                                            KContinueLock, Worker_Wakeup, tid_, 
-                                            I_, J, K, L, kq_out, current_time, 
-                                            lqbuf, wr, tid, I, fildes_, Steps_, 
-                                            fildes, Steps, PolledRead >>
+                                            TaskReadyAges, RoundRobinToken, 
+                                            tid_, I_, J, K, L, kq_out, 
+                                            current_time, lqbuf, wr, tid, I, 
+                                            fildes_, Steps_, fildes, Steps, 
+                                            PolledRead >>
 
 LQ_Unlock2(self) == /\ pc[self] = "LQ_Unlock2"
                     /\ LQLocks' = [LQLocks EXCEPT ![self] = NullLock]
                     /\ pc' = [pc EXCEPT ![self] = "Has_Work_Loop"]
                     /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
-                                    GQLock, LQA, LQAClock, LQASizes, LQB, 
-                                    LQBSizes, TaskIdCurrent, TasksFinished, 
-                                    RTStarted, RTStopped, Futures, FuturePush, 
+                                    GQPPPointer, GQLock, LQA, LQAClock, 
+                                    ClkCycles, LQASizes, LQB, LQBSizes, 
+                                    TaskIdCurrent, TasksFinished, RTStarted, 
+                                    RTStopped, Futures, FuturePush, 
                                     FuturesBlocked, FutureWorkers, 
                                     FDReadsAvailable, FDWritesAvailable, 
-                                    KQueues, KContinueLock, Worker_Wakeup, 
+                                    KQueues, TaskReadyAges, RoundRobinToken, 
                                     tid_, task, HasWork, I_, J, K, L, kq_out, 
                                     current_time, lqbuf, wr, tid, I, fildes_, 
                                     Steps_, fildes, Steps, PolledRead >>
@@ -2787,19 +3568,21 @@ LQ_Unlock2(self) == /\ pc[self] = "LQ_Unlock2"
 WFinish(self) == /\ pc[self] = "WFinish"
                  /\ TRUE
                  /\ pc' = [pc EXCEPT ![self] = "Done"]
-                 /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, GQLock, 
-                                 LQA, LQAClock, LQASizes, LQB, LQBSizes, 
-                                 LQLocks, TaskIdCurrent, TasksFinished, 
-                                 RTStarted, RTStopped, Futures, FuturePush, 
+                 /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
+                                 GQPPPointer, GQLock, LQA, LQAClock, ClkCycles, 
+                                 LQASizes, LQB, LQBSizes, LQLocks, 
+                                 TaskIdCurrent, TasksFinished, RTStarted, 
+                                 RTStopped, Futures, FuturePush, 
                                  FuturesBlocked, FutureWorkers, 
                                  FDReadsAvailable, FDWritesAvailable, KQueues, 
-                                 KContinueLock, Worker_Wakeup, tid_, task, 
+                                 TaskReadyAges, RoundRobinToken, tid_, task, 
                                  HasWork, I_, J, K, L, kq_out, current_time, 
                                  lqbuf, wr, tid, I, fildes_, Steps_, fildes, 
                                  Steps, PolledRead >>
 
 WorkerThread(self) == WWait(self) \/ Main_Loop(self) \/ RTStopCheck(self)
-                         \/ ProcessQB_LQ_Lock(self) \/ LQ_Flush_Loop(self)
+                         \/ Kernel(self) \/ ProcessQB_LQ_Lock(self)
+                         \/ LQ_Flush_Loop(self)
                          \/ LQ_Flush_Loop_Inner(self)
                          \/ LQ_Flush_Continue(self)
                          \/ LQ_Flush_Remove_From_Old(self)
@@ -2814,8 +3597,28 @@ WorkerThread(self) == WWait(self) \/ Main_Loop(self) \/ RTStopCheck(self)
                          \/ LQ_Flush_To_GQB2(self)
                          \/ LQ_Flush_To_GQBLoop2(self)
                          \/ LQ_Flush_To_GQBLoop2AfterCheckContinuation(self)
-                         \/ LQ_Flush_Step(self) \/ LQ_Poll_KQ(self)
-                         \/ LQ_Poll_KQ_Begin(self) \/ Update_Ready(self)
+                         \/ LQ_Flush_Step(self)
+                         \/ LQ_GQ_CheckPushPull(self)
+                         \/ Begin_LQ_GQ_PushPull(self)
+                         \/ AttemptEnqueueFromGlobalLockGQ2(self)
+                         \/ GQ_Poll_Check_KQ2(self)
+                         \/ GQ_Poll_KQ_Begin2(self)
+                         \/ GQ_Update_Ready2(self)
+                         \/ GQ_Flush_Ready_Begin2(self)
+                         \/ GQ_Flush_Ready2(self)
+                         \/ GQ_Flush_Check_Timer2(self)
+                         \/ GQ_Flush_Ready_Check_Ready2(self)
+                         \/ GQ_Flush_Ready_Step2(self)
+                         \/ GQ_Flush_Ready_Done2(self)
+                         \/ AttemptEnqueueFromGlobalWhile2(self)
+                         \/ UpdateGQAPointers2(self)
+                         \/ UpdateGQAPointersCheck2(self)
+                         \/ PushPullBegin(self)
+                         \/ PerformFirstPushPull(self) \/ PushPull(self)
+                         \/ PerformPushPull(self) \/ PushPullStep(self)
+                         \/ AttemptEnqueueFromGlobalFinish2(self)
+                         \/ LQ_Poll_KQ(self) \/ LQ_Poll_KQ_Begin(self)
+                         \/ Update_Ready(self) \/ Flush_Ready_Begin(self)
                          \/ Flush_Ready(self) \/ Flush_Check_Timer(self)
                          \/ Flush_Ready_Check_Ready(self)
                          \/ CheckLQSize_(self) \/ LockGQ_(self)
@@ -2832,6 +3635,7 @@ WorkerThread(self) == WWait(self) \/ Main_Loop(self) \/ RTStopCheck(self)
                          \/ AttemptEnqueueFromGlobalLockGQ(self)
                          \/ GQ_Poll_Check_KQ(self)
                          \/ GQ_Poll_KQ_Begin(self) \/ GQ_Update_Ready(self)
+                         \/ GQ_Flush_Ready_Begin(self)
                          \/ GQ_Flush_Ready(self)
                          \/ GQ_Flush_Check_Timer(self)
                          \/ GQ_Flush_Ready_Check_Ready(self)
@@ -2857,9 +3661,10 @@ WorkerThread(self) == WWait(self) \/ Main_Loop(self) \/ RTStopCheck(self)
                          \/ WorkStealingCont2(self)
                          \/ WorkstealingSteal2(self)
                          \/ WorkStealingUnlockVictimLock2(self)
-                         \/ WorkStealing2MoveToSelf(self) \/ No_Tasks(self)
-                         \/ Has_Work_Loop(self) \/ DoFuturePoll(self)
-                         \/ ProcessStatus(self) \/ LQ_Lock2(self)
+                         \/ No_Tasks(self) \/ Has_Work_Loop(self)
+                         \/ DoFuturePoll(self) \/ ProcessStatus(self)
+                         \/ ProcessStatusInLQ(self)
+                         \/ LQ_Unlock_AfterProc(self) \/ LQ_Lock2(self)
                          \/ LQ_Pull2(self) \/ LQ_Pull_Empty2(self)
                          \/ UpdateLQAClock2(self)
                          \/ IncrementLQAClocK2(self) \/ LQ_Unlock2(self)
@@ -2867,13 +3672,14 @@ WorkerThread(self) == WWait(self) \/ Main_Loop(self) \/ RTStopCheck(self)
 
 TPPLoop(self) == /\ pc[self] = "TPPLoop"
                  /\ pc' = [pc EXCEPT ![self] = "TPPStart"]
-                 /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, GQLock, 
-                                 LQA, LQAClock, LQASizes, LQB, LQBSizes, 
-                                 LQLocks, TaskIdCurrent, TasksFinished, 
-                                 RTStarted, RTStopped, Futures, FuturePush, 
+                 /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
+                                 GQPPPointer, GQLock, LQA, LQAClock, ClkCycles, 
+                                 LQASizes, LQB, LQBSizes, LQLocks, 
+                                 TaskIdCurrent, TasksFinished, RTStarted, 
+                                 RTStopped, Futures, FuturePush, 
                                  FuturesBlocked, FutureWorkers, 
                                  FDReadsAvailable, FDWritesAvailable, KQueues, 
-                                 KContinueLock, Worker_Wakeup, tid_, task, 
+                                 TaskReadyAges, RoundRobinToken, tid_, task, 
                                  HasWork, I_, J, K, L, kq_out, current_time, 
                                  lqbuf, wr, tid, I, fildes_, Steps_, fildes, 
                                  Steps, PolledRead >>
@@ -2882,18 +3688,19 @@ TPPStart(self) == /\ pc[self] = "TPPStart"
                   /\ FuturePush[wr[self]] # NullFuture \/ RTStopped
                   /\ IF RTStopped
                         THEN /\ pc' = [pc EXCEPT ![self] = "TPPDone"]
-                             /\ UNCHANGED << TaskIdCurrent, tid >>
+                             /\ UNCHANGED << TaskIdCurrent, TaskReadyAges, tid >>
                         ELSE /\ TaskIdCurrent' = TaskIdCurrent + 1
+                             /\ TaskReadyAges' = Append(TaskReadyAges, 0)
                              /\ tid' = [tid EXCEPT ![self] = TaskIdCurrent']
                              /\ pc' = [pc EXCEPT ![self] = "TPPLockLQ"]
-                  /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, GQLock, 
-                                  LQA, LQAClock, LQASizes, LQB, LQBSizes, 
-                                  LQLocks, TasksFinished, RTStarted, RTStopped, 
-                                  Futures, FuturePush, FuturesBlocked, 
-                                  FutureWorkers, FDReadsAvailable, 
-                                  FDWritesAvailable, KQueues, KContinueLock, 
-                                  Worker_Wakeup, tid_, task, HasWork, I_, J, K, 
-                                  L, kq_out, current_time, lqbuf, wr, I, 
+                  /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
+                                  GQPPPointer, GQLock, LQA, LQAClock, 
+                                  ClkCycles, LQASizes, LQB, LQBSizes, LQLocks, 
+                                  TasksFinished, RTStarted, RTStopped, Futures, 
+                                  FuturePush, FuturesBlocked, FutureWorkers, 
+                                  FDReadsAvailable, FDWritesAvailable, KQueues, 
+                                  RoundRobinToken, tid_, task, HasWork, I_, J, 
+                                  K, L, kq_out, current_time, lqbuf, wr, I, 
                                   fildes_, Steps_, fildes, Steps, PolledRead >>
 
 TPPLockLQ(self) == /\ pc[self] = "TPPLockLQ"
@@ -2901,13 +3708,14 @@ TPPLockLQ(self) == /\ pc[self] = "TPPLockLQ"
                    /\ LQLocks' = [LQLocks EXCEPT ![wr[self]] = wr[self]]
                    /\ pc' = [pc EXCEPT ![self] = "CheckLQSize"]
                    /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
-                                   GQLock, LQA, LQAClock, LQASizes, LQB, 
-                                   LQBSizes, TaskIdCurrent, TasksFinished, 
-                                   RTStarted, RTStopped, Futures, FuturePush, 
+                                   GQPPPointer, GQLock, LQA, LQAClock, 
+                                   ClkCycles, LQASizes, LQB, LQBSizes, 
+                                   TaskIdCurrent, TasksFinished, RTStarted, 
+                                   RTStopped, Futures, FuturePush, 
                                    FuturesBlocked, FutureWorkers, 
                                    FDReadsAvailable, FDWritesAvailable, 
-                                   KQueues, KContinueLock, Worker_Wakeup, tid_, 
-                                   task, HasWork, I_, J, K, L, kq_out, 
+                                   KQueues, TaskReadyAges, RoundRobinToken, 
+                                   tid_, task, HasWork, I_, J, K, L, kq_out, 
                                    current_time, lqbuf, wr, tid, I, fildes_, 
                                    Steps_, fildes, Steps, PolledRead >>
 
@@ -2916,29 +3724,30 @@ CheckLQSize(self) == /\ pc[self] = "CheckLQSize"
                            THEN /\ pc' = [pc EXCEPT ![self] = "LockGQ"]
                            ELSE /\ pc' = [pc EXCEPT ![self] = "PushLQ"]
                      /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
-                                     GQLock, LQA, LQAClock, LQASizes, LQB, 
-                                     LQBSizes, LQLocks, TaskIdCurrent, 
-                                     TasksFinished, RTStarted, RTStopped, 
-                                     Futures, FuturePush, FuturesBlocked, 
-                                     FutureWorkers, FDReadsAvailable, 
-                                     FDWritesAvailable, KQueues, KContinueLock, 
-                                     Worker_Wakeup, tid_, task, HasWork, I_, J, 
-                                     K, L, kq_out, current_time, lqbuf, wr, 
-                                     tid, I, fildes_, Steps_, fildes, Steps, 
-                                     PolledRead >>
+                                     GQPPPointer, GQLock, LQA, LQAClock, 
+                                     ClkCycles, LQASizes, LQB, LQBSizes, 
+                                     LQLocks, TaskIdCurrent, TasksFinished, 
+                                     RTStarted, RTStopped, Futures, FuturePush, 
+                                     FuturesBlocked, FutureWorkers, 
+                                     FDReadsAvailable, FDWritesAvailable, 
+                                     KQueues, TaskReadyAges, RoundRobinToken, 
+                                     tid_, task, HasWork, I_, J, K, L, kq_out, 
+                                     current_time, lqbuf, wr, tid, I, fildes_, 
+                                     Steps_, fildes, Steps, PolledRead >>
 
 LockGQ(self) == /\ pc[self] = "LockGQ"
                 /\ GQLock = NullLock
                 /\ GQLock' = wr[self]
                 /\ I' = [I EXCEPT ![self] = LQSize \div 2 + 1]
                 /\ pc' = [pc EXCEPT ![self] = "PushGQLoop"]
-                /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, LQA, 
-                                LQAClock, LQASizes, LQB, LQBSizes, LQLocks, 
+                /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
+                                GQPPPointer, LQA, LQAClock, ClkCycles, 
+                                LQASizes, LQB, LQBSizes, LQLocks, 
                                 TaskIdCurrent, TasksFinished, RTStarted, 
                                 RTStopped, Futures, FuturePush, FuturesBlocked, 
                                 FutureWorkers, FDReadsAvailable, 
-                                FDWritesAvailable, KQueues, KContinueLock, 
-                                Worker_Wakeup, tid_, task, HasWork, I_, J, K, 
+                                FDWritesAvailable, KQueues, TaskReadyAges, 
+                                RoundRobinToken, tid_, task, HasWork, I_, J, K, 
                                 L, kq_out, current_time, lqbuf, wr, tid, 
                                 fildes_, Steps_, fildes, Steps, PolledRead >>
 
@@ -2947,34 +3756,34 @@ PushGQLoop(self) == /\ pc[self] = "PushGQLoop"
                           THEN /\ pc' = [pc EXCEPT ![self] = "PushGQStatusCheck"]
                           ELSE /\ pc' = [pc EXCEPT ![self] = "UnlockGQ"]
                     /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
-                                    GQLock, LQA, LQAClock, LQASizes, LQB, 
-                                    LQBSizes, LQLocks, TaskIdCurrent, 
-                                    TasksFinished, RTStarted, RTStopped, 
-                                    Futures, FuturePush, FuturesBlocked, 
-                                    FutureWorkers, FDReadsAvailable, 
-                                    FDWritesAvailable, KQueues, KContinueLock, 
-                                    Worker_Wakeup, tid_, task, HasWork, I_, J, 
-                                    K, L, kq_out, current_time, lqbuf, wr, tid, 
-                                    I, fildes_, Steps_, fildes, Steps, 
-                                    PolledRead >>
+                                    GQPPPointer, GQLock, LQA, LQAClock, 
+                                    ClkCycles, LQASizes, LQB, LQBSizes, 
+                                    LQLocks, TaskIdCurrent, TasksFinished, 
+                                    RTStarted, RTStopped, Futures, FuturePush, 
+                                    FuturesBlocked, FutureWorkers, 
+                                    FDReadsAvailable, FDWritesAvailable, 
+                                    KQueues, TaskReadyAges, RoundRobinToken, 
+                                    tid_, task, HasWork, I_, J, K, L, kq_out, 
+                                    current_time, lqbuf, wr, tid, I, fildes_, 
+                                    Steps_, fildes, Steps, PolledRead >>
 
 PushGQStatusCheck(self) == /\ pc[self] = "PushGQStatusCheck"
                            /\ IF LQA[wr[self]][I[self]] # NullTask
                                  THEN /\ pc' = [pc EXCEPT ![self] = "PushTaskNotNull"]
                                  ELSE /\ pc' = [pc EXCEPT ![self] = "GQPushWhileStep"]
                            /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, 
-                                           GQBSize, GQLock, LQA, LQAClock, 
-                                           LQASizes, LQB, LQBSizes, LQLocks, 
-                                           TaskIdCurrent, TasksFinished, 
-                                           RTStarted, RTStopped, Futures, 
-                                           FuturePush, FuturesBlocked, 
+                                           GQBSize, GQPPPointer, GQLock, LQA, 
+                                           LQAClock, ClkCycles, LQASizes, LQB, 
+                                           LQBSizes, LQLocks, TaskIdCurrent, 
+                                           TasksFinished, RTStarted, RTStopped, 
+                                           Futures, FuturePush, FuturesBlocked, 
                                            FutureWorkers, FDReadsAvailable, 
                                            FDWritesAvailable, KQueues, 
-                                           KContinueLock, Worker_Wakeup, tid_, 
-                                           task, HasWork, I_, J, K, L, kq_out, 
-                                           current_time, lqbuf, wr, tid, I, 
-                                           fildes_, Steps_, fildes, Steps, 
-                                           PolledRead >>
+                                           TaskReadyAges, RoundRobinToken, 
+                                           tid_, task, HasWork, I_, J, K, L, 
+                                           kq_out, current_time, lqbuf, wr, 
+                                           tid, I, fildes_, Steps_, fildes, 
+                                           Steps, PolledRead >>
 
 PushTaskNotNull(self) == /\ pc[self] = "PushTaskNotNull"
                          /\ IF LQA[wr[self]][I[self]].state = TSReady
@@ -2996,13 +3805,14 @@ PushTaskNotNull(self) == /\ pc[self] = "PushTaskNotNull"
                                                /\ UNCHANGED << GQB, GQBSize, 
                                                                LQA, KQueues >>
                                     /\ UNCHANGED << GQA, GQALast >>
-                         /\ UNCHANGED << GQAFirst, GQLock, LQAClock, LQASizes, 
-                                         LQB, LQBSizes, LQLocks, TaskIdCurrent, 
+                         /\ UNCHANGED << GQAFirst, GQPPPointer, GQLock, 
+                                         LQAClock, ClkCycles, LQASizes, LQB, 
+                                         LQBSizes, LQLocks, TaskIdCurrent, 
                                          TasksFinished, RTStarted, RTStopped, 
                                          Futures, FuturePush, FuturesBlocked, 
                                          FutureWorkers, FDReadsAvailable, 
-                                         FDWritesAvailable, KContinueLock, 
-                                         Worker_Wakeup, tid_, task, HasWork, 
+                                         FDWritesAvailable, TaskReadyAges, 
+                                         RoundRobinToken, tid_, task, HasWork, 
                                          I_, J, K, L, kq_out, current_time, 
                                          lqbuf, wr, tid, I, fildes_, Steps_, 
                                          fildes, Steps, PolledRead >>
@@ -3014,28 +3824,30 @@ PushGQPushToKQ(self) == /\ pc[self] = "PushGQPushToKQ"
                                    /\ UNCHANGED KQueues
                         /\ pc' = [pc EXCEPT ![self] = "GQPushWhileStep"]
                         /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
-                                        GQLock, LQA, LQAClock, LQASizes, LQB, 
-                                        LQBSizes, LQLocks, TaskIdCurrent, 
-                                        TasksFinished, RTStarted, RTStopped, 
-                                        Futures, FuturePush, FuturesBlocked, 
+                                        GQPPPointer, GQLock, LQA, LQAClock, 
+                                        ClkCycles, LQASizes, LQB, LQBSizes, 
+                                        LQLocks, TaskIdCurrent, TasksFinished, 
+                                        RTStarted, RTStopped, Futures, 
+                                        FuturePush, FuturesBlocked, 
                                         FutureWorkers, FDReadsAvailable, 
-                                        FDWritesAvailable, KContinueLock, 
-                                        Worker_Wakeup, tid_, task, HasWork, I_, 
-                                        J, K, L, kq_out, current_time, lqbuf, 
-                                        wr, tid, I, fildes_, Steps_, fildes, 
-                                        Steps, PolledRead >>
+                                        FDWritesAvailable, TaskReadyAges, 
+                                        RoundRobinToken, tid_, task, HasWork, 
+                                        I_, J, K, L, kq_out, current_time, 
+                                        lqbuf, wr, tid, I, fildes_, Steps_, 
+                                        fildes, Steps, PolledRead >>
 
 GQPushWhileStep(self) == /\ pc[self] = "GQPushWhileStep"
                          /\ I' = [I EXCEPT ![self] = I[self] + 1]
                          /\ pc' = [pc EXCEPT ![self] = "PushGQLoop"]
                          /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
-                                         GQLock, LQA, LQAClock, LQASizes, LQB, 
-                                         LQBSizes, LQLocks, TaskIdCurrent, 
-                                         TasksFinished, RTStarted, RTStopped, 
-                                         Futures, FuturePush, FuturesBlocked, 
+                                         GQPPPointer, GQLock, LQA, LQAClock, 
+                                         ClkCycles, LQASizes, LQB, LQBSizes, 
+                                         LQLocks, TaskIdCurrent, TasksFinished, 
+                                         RTStarted, RTStopped, Futures, 
+                                         FuturePush, FuturesBlocked, 
                                          FutureWorkers, FDReadsAvailable, 
                                          FDWritesAvailable, KQueues, 
-                                         KContinueLock, Worker_Wakeup, tid_, 
+                                         TaskReadyAges, RoundRobinToken, tid_, 
                                          task, HasWork, I_, J, K, L, kq_out, 
                                          current_time, lqbuf, wr, tid, fildes_, 
                                          Steps_, fildes, Steps, PolledRead >>
@@ -3044,13 +3856,13 @@ UnlockGQ(self) == /\ pc[self] = "UnlockGQ"
                   /\ GQLock' = NullLock
                   /\ LQASizes' = [LQASizes EXCEPT ![wr[self]] = LQSize \div 2]
                   /\ pc' = [pc EXCEPT ![self] = "CheckClock"]
-                  /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, LQA, 
-                                  LQAClock, LQB, LQBSizes, LQLocks, 
-                                  TaskIdCurrent, TasksFinished, RTStarted, 
-                                  RTStopped, Futures, FuturePush, 
-                                  FuturesBlocked, FutureWorkers, 
+                  /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
+                                  GQPPPointer, LQA, LQAClock, ClkCycles, LQB, 
+                                  LQBSizes, LQLocks, TaskIdCurrent, 
+                                  TasksFinished, RTStarted, RTStopped, Futures, 
+                                  FuturePush, FuturesBlocked, FutureWorkers, 
                                   FDReadsAvailable, FDWritesAvailable, KQueues, 
-                                  KContinueLock, Worker_Wakeup, tid_, task, 
+                                  TaskReadyAges, RoundRobinToken, tid_, task, 
                                   HasWork, I_, J, K, L, kq_out, current_time, 
                                   lqbuf, wr, tid, I, fildes_, Steps_, fildes, 
                                   Steps, PolledRead >>
@@ -3064,39 +3876,42 @@ CheckClock(self) == /\ pc[self] = "CheckClock"
                                /\ UNCHANGED << LQA, LQAClock, LQASizes >>
                     /\ pc' = [pc EXCEPT ![self] = "PushLQ"]
                     /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
-                                    GQLock, LQB, LQBSizes, LQLocks, 
-                                    TaskIdCurrent, TasksFinished, RTStarted, 
-                                    RTStopped, Futures, FuturePush, 
-                                    FuturesBlocked, FutureWorkers, 
-                                    FDReadsAvailable, FDWritesAvailable, 
-                                    KQueues, KContinueLock, Worker_Wakeup, 
-                                    tid_, task, HasWork, I_, J, K, L, kq_out, 
-                                    current_time, lqbuf, wr, tid, I, fildes_, 
-                                    Steps_, fildes, Steps, PolledRead >>
+                                    GQPPPointer, GQLock, ClkCycles, LQB, 
+                                    LQBSizes, LQLocks, TaskIdCurrent, 
+                                    TasksFinished, RTStarted, RTStopped, 
+                                    Futures, FuturePush, FuturesBlocked, 
+                                    FutureWorkers, FDReadsAvailable, 
+                                    FDWritesAvailable, KQueues, TaskReadyAges, 
+                                    RoundRobinToken, tid_, task, HasWork, I_, 
+                                    J, K, L, kq_out, current_time, lqbuf, wr, 
+                                    tid, I, fildes_, Steps_, fildes, Steps, 
+                                    PolledRead >>
 
 PushLQ(self) == /\ pc[self] = "PushLQ"
                 /\ LQASizes' = [LQASizes EXCEPT ![wr[self]] = LQASizes[wr[self]] + 1]
                 /\ LQA' = [LQA EXCEPT ![wr[self]][LQASizes'[wr[self]]] = [t_id |-> tid[self], state |-> TSReady, future |-> FuturePush[wr[self]], blocked_io_info |-> NullBlockedIOInfoType]]
                 /\ pc' = [pc EXCEPT ![self] = "TPPReleaseLockLQAndClearFuture"]
-                /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, GQLock, 
-                                LQAClock, LQB, LQBSizes, LQLocks, 
-                                TaskIdCurrent, TasksFinished, RTStarted, 
-                                RTStopped, Futures, FuturePush, FuturesBlocked, 
-                                FutureWorkers, FDReadsAvailable, 
-                                FDWritesAvailable, KQueues, KContinueLock, 
-                                Worker_Wakeup, tid_, task, HasWork, I_, J, K, 
-                                L, kq_out, current_time, lqbuf, wr, tid, I, 
-                                fildes_, Steps_, fildes, Steps, PolledRead >>
+                /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
+                                GQPPPointer, GQLock, LQAClock, ClkCycles, LQB, 
+                                LQBSizes, LQLocks, TaskIdCurrent, 
+                                TasksFinished, RTStarted, RTStopped, Futures, 
+                                FuturePush, FuturesBlocked, FutureWorkers, 
+                                FDReadsAvailable, FDWritesAvailable, KQueues, 
+                                TaskReadyAges, RoundRobinToken, tid_, task, 
+                                HasWork, I_, J, K, L, kq_out, current_time, 
+                                lqbuf, wr, tid, I, fildes_, Steps_, fildes, 
+                                Steps, PolledRead >>
 
 TPPReleaseLockLQAndClearFuture(self) == /\ pc[self] = "TPPReleaseLockLQAndClearFuture"
                                         /\ LQLocks' = [LQLocks EXCEPT ![wr[self]] = NullLock]
                                         /\ FuturePush' = [FuturePush EXCEPT ![wr[self]] = NullFuture]
                                         /\ pc' = [pc EXCEPT ![self] = "TPPLoop"]
                                         /\ UNCHANGED << GQA, GQAFirst, GQALast, 
-                                                        GQB, GQBSize, GQLock, 
+                                                        GQB, GQBSize, 
+                                                        GQPPPointer, GQLock, 
                                                         LQA, LQAClock, 
-                                                        LQASizes, LQB, 
-                                                        LQBSizes, 
+                                                        ClkCycles, LQASizes, 
+                                                        LQB, LQBSizes, 
                                                         TaskIdCurrent, 
                                                         TasksFinished, 
                                                         RTStarted, RTStopped, 
@@ -3105,8 +3920,8 @@ TPPReleaseLockLQAndClearFuture(self) == /\ pc[self] = "TPPReleaseLockLQAndClearF
                                                         FutureWorkers, 
                                                         FDReadsAvailable, 
                                                         FDWritesAvailable, 
-                                                        KQueues, KContinueLock, 
-                                                        Worker_Wakeup, tid_, 
+                                                        KQueues, TaskReadyAges, 
+                                                        RoundRobinToken, tid_, 
                                                         task, HasWork, I_, J, 
                                                         K, L, kq_out, 
                                                         current_time, lqbuf, 
@@ -3117,13 +3932,14 @@ TPPReleaseLockLQAndClearFuture(self) == /\ pc[self] = "TPPReleaseLockLQAndClearF
 TPPDone(self) == /\ pc[self] = "TPPDone"
                  /\ TRUE
                  /\ pc' = [pc EXCEPT ![self] = "Done"]
-                 /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, GQLock, 
-                                 LQA, LQAClock, LQASizes, LQB, LQBSizes, 
-                                 LQLocks, TaskIdCurrent, TasksFinished, 
-                                 RTStarted, RTStopped, Futures, FuturePush, 
+                 /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
+                                 GQPPPointer, GQLock, LQA, LQAClock, ClkCycles, 
+                                 LQASizes, LQB, LQBSizes, LQLocks, 
+                                 TaskIdCurrent, TasksFinished, RTStarted, 
+                                 RTStopped, Futures, FuturePush, 
                                  FuturesBlocked, FutureWorkers, 
                                  FDReadsAvailable, FDWritesAvailable, KQueues, 
-                                 KContinueLock, Worker_Wakeup, tid_, task, 
+                                 TaskReadyAges, RoundRobinToken, tid_, task, 
                                  HasWork, I_, J, K, L, kq_out, current_time, 
                                  lqbuf, wr, tid, I, fildes_, Steps_, fildes, 
                                  Steps, PolledRead >>
@@ -3145,7 +3961,8 @@ RootFutureAwaitStarted(self) == /\ pc[self] = "RootFutureAwaitStarted"
                                       THEN /\ pc' = [pc EXCEPT ![self] = "RootFutureDone"]
                                       ELSE /\ pc' = [pc EXCEPT ![self] = "RootFutureStarted"]
                                 /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, 
-                                                GQBSize, GQLock, LQA, LQAClock, 
+                                                GQBSize, GQPPPointer, GQLock, 
+                                                LQA, LQAClock, ClkCycles, 
                                                 LQASizes, LQB, LQBSizes, 
                                                 LQLocks, TaskIdCurrent, 
                                                 TasksFinished, RTStarted, 
@@ -3153,7 +3970,7 @@ RootFutureAwaitStarted(self) == /\ pc[self] = "RootFutureAwaitStarted"
                                                 FuturesBlocked, FutureWorkers, 
                                                 FDReadsAvailable, 
                                                 FDWritesAvailable, KQueues, 
-                                                KContinueLock, Worker_Wakeup, 
+                                                TaskReadyAges, RoundRobinToken, 
                                                 tid_, task, HasWork, I_, J, K, 
                                                 L, kq_out, current_time, lqbuf, 
                                                 wr, tid, I, fildes_, Steps_, 
@@ -3166,29 +3983,31 @@ RootFutureStarted(self) == /\ pc[self] = "RootFutureStarted"
                                  ELSE /\ pc' = [pc EXCEPT ![self] = "RootFutureDone"]
                                       /\ UNCHANGED Steps_
                            /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, 
-                                           GQBSize, GQLock, LQA, LQAClock, 
-                                           LQASizes, LQB, LQBSizes, LQLocks, 
-                                           TaskIdCurrent, TasksFinished, 
-                                           RTStarted, RTStopped, Futures, 
-                                           FuturePush, FuturesBlocked, 
+                                           GQBSize, GQPPPointer, GQLock, LQA, 
+                                           LQAClock, ClkCycles, LQASizes, LQB, 
+                                           LQBSizes, LQLocks, TaskIdCurrent, 
+                                           TasksFinished, RTStarted, RTStopped, 
+                                           Futures, FuturePush, FuturesBlocked, 
                                            FutureWorkers, FDReadsAvailable, 
                                            FDWritesAvailable, KQueues, 
-                                           KContinueLock, Worker_Wakeup, tid_, 
-                                           task, HasWork, I_, J, K, L, kq_out, 
-                                           current_time, lqbuf, wr, tid, I, 
-                                           fildes_, fildes, Steps, PolledRead >>
+                                           TaskReadyAges, RoundRobinToken, 
+                                           tid_, task, HasWork, I_, J, K, L, 
+                                           kq_out, current_time, lqbuf, wr, 
+                                           tid, I, fildes_, fildes, Steps, 
+                                           PolledRead >>
 
 SpawnFuture(self) == /\ pc[self] = "SpawnFuture"
                      /\ FuturePush[FutureWorkers[self]] = NullFuture
                      /\ FuturePush' = [FuturePush EXCEPT ![FutureWorkers[self]] = RootFuture + Steps_[self]]
                      /\ pc' = [pc EXCEPT ![self] = "SpawnFutureWaitFinish"]
                      /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
-                                     GQLock, LQA, LQAClock, LQASizes, LQB, 
-                                     LQBSizes, LQLocks, TaskIdCurrent, 
-                                     TasksFinished, RTStarted, RTStopped, 
-                                     Futures, FuturesBlocked, FutureWorkers, 
+                                     GQPPPointer, GQLock, LQA, LQAClock, 
+                                     ClkCycles, LQASizes, LQB, LQBSizes, 
+                                     LQLocks, TaskIdCurrent, TasksFinished, 
+                                     RTStarted, RTStopped, Futures, 
+                                     FuturesBlocked, FutureWorkers, 
                                      FDReadsAvailable, FDWritesAvailable, 
-                                     KQueues, KContinueLock, Worker_Wakeup, 
+                                     KQueues, TaskReadyAges, RoundRobinToken, 
                                      tid_, task, HasWork, I_, J, K, L, kq_out, 
                                      current_time, lqbuf, wr, tid, I, fildes_, 
                                      Steps_, fildes, Steps, PolledRead >>
@@ -3197,7 +4016,8 @@ SpawnFutureWaitFinish(self) == /\ pc[self] = "SpawnFutureWaitFinish"
                                /\ FuturePush[FutureWorkers[self]] = NullFuture
                                /\ pc' = [pc EXCEPT ![self] = "RootFutureStarted"]
                                /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, 
-                                               GQBSize, GQLock, LQA, LQAClock, 
+                                               GQBSize, GQPPPointer, GQLock, 
+                                               LQA, LQAClock, ClkCycles, 
                                                LQASizes, LQB, LQBSizes, 
                                                LQLocks, TaskIdCurrent, 
                                                TasksFinished, RTStarted, 
@@ -3205,7 +4025,7 @@ SpawnFutureWaitFinish(self) == /\ pc[self] = "SpawnFutureWaitFinish"
                                                FuturesBlocked, FutureWorkers, 
                                                FDReadsAvailable, 
                                                FDWritesAvailable, KQueues, 
-                                               KContinueLock, Worker_Wakeup, 
+                                               TaskReadyAges, RoundRobinToken, 
                                                tid_, task, HasWork, I_, J, K, 
                                                L, kq_out, current_time, lqbuf, 
                                                wr, tid, I, fildes_, Steps_, 
@@ -3215,17 +4035,17 @@ RootFutureDone(self) == /\ pc[self] = "RootFutureDone"
                         /\ Futures' = [Futures EXCEPT ![self] = FSCompleted]
                         /\ pc' = [pc EXCEPT ![self] = "Done"]
                         /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
-                                        GQLock, LQA, LQAClock, LQASizes, LQB, 
-                                        LQBSizes, LQLocks, TaskIdCurrent, 
-                                        TasksFinished, RTStarted, RTStopped, 
-                                        FuturePush, FuturesBlocked, 
-                                        FutureWorkers, FDReadsAvailable, 
-                                        FDWritesAvailable, KQueues, 
-                                        KContinueLock, Worker_Wakeup, tid_, 
-                                        task, HasWork, I_, J, K, L, kq_out, 
-                                        current_time, lqbuf, wr, tid, I, 
-                                        fildes_, Steps_, fildes, Steps, 
-                                        PolledRead >>
+                                        GQPPPointer, GQLock, LQA, LQAClock, 
+                                        ClkCycles, LQASizes, LQB, LQBSizes, 
+                                        LQLocks, TaskIdCurrent, TasksFinished, 
+                                        RTStarted, RTStopped, FuturePush, 
+                                        FuturesBlocked, FutureWorkers, 
+                                        FDReadsAvailable, FDWritesAvailable, 
+                                        KQueues, TaskReadyAges, 
+                                        RoundRobinToken, tid_, task, HasWork, 
+                                        I_, J, K, L, kq_out, current_time, 
+                                        lqbuf, wr, tid, I, fildes_, Steps_, 
+                                        fildes, Steps, PolledRead >>
 
 RF(self) == RootFutureAwaitStarted(self) \/ RootFutureStarted(self)
                \/ SpawnFuture(self) \/ SpawnFutureWaitFinish(self)
@@ -3236,18 +4056,19 @@ OtherFutureStarted(self) == /\ pc[self] = "OtherFutureStarted"
                                   THEN /\ pc' = [pc EXCEPT ![self] = "AwaitInLoop"]
                                   ELSE /\ pc' = [pc EXCEPT ![self] = "OtherFutureDone"]
                             /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, 
-                                            GQBSize, GQLock, LQA, LQAClock, 
-                                            LQASizes, LQB, LQBSizes, LQLocks, 
-                                            TaskIdCurrent, TasksFinished, 
-                                            RTStarted, RTStopped, Futures, 
-                                            FuturePush, FuturesBlocked, 
-                                            FutureWorkers, FDReadsAvailable, 
+                                            GQBSize, GQPPPointer, GQLock, LQA, 
+                                            LQAClock, ClkCycles, LQASizes, LQB, 
+                                            LQBSizes, LQLocks, TaskIdCurrent, 
+                                            TasksFinished, RTStarted, 
+                                            RTStopped, Futures, FuturePush, 
+                                            FuturesBlocked, FutureWorkers, 
+                                            FDReadsAvailable, 
                                             FDWritesAvailable, KQueues, 
-                                            KContinueLock, Worker_Wakeup, tid_, 
-                                            task, HasWork, I_, J, K, L, kq_out, 
-                                            current_time, lqbuf, wr, tid, I, 
-                                            fildes_, Steps_, fildes, Steps, 
-                                            PolledRead >>
+                                            TaskReadyAges, RoundRobinToken, 
+                                            tid_, task, HasWork, I_, J, K, L, 
+                                            kq_out, current_time, lqbuf, wr, 
+                                            tid, I, fildes_, Steps_, fildes, 
+                                            Steps, PolledRead >>
 
 AwaitInLoop(self) == /\ pc[self] = "AwaitInLoop"
                      /\ Futures[self] = FSPolling \/ RTStopped = TRUE
@@ -3255,16 +4076,16 @@ AwaitInLoop(self) == /\ pc[self] = "AwaitInLoop"
                            THEN /\ pc' = [pc EXCEPT ![self] = "OtherFutureDone"]
                            ELSE /\ pc' = [pc EXCEPT ![self] = "OtherFutureContinue"]
                      /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
-                                     GQLock, LQA, LQAClock, LQASizes, LQB, 
-                                     LQBSizes, LQLocks, TaskIdCurrent, 
-                                     TasksFinished, RTStarted, RTStopped, 
-                                     Futures, FuturePush, FuturesBlocked, 
-                                     FutureWorkers, FDReadsAvailable, 
-                                     FDWritesAvailable, KQueues, KContinueLock, 
-                                     Worker_Wakeup, tid_, task, HasWork, I_, J, 
-                                     K, L, kq_out, current_time, lqbuf, wr, 
-                                     tid, I, fildes_, Steps_, fildes, Steps, 
-                                     PolledRead >>
+                                     GQPPPointer, GQLock, LQA, LQAClock, 
+                                     ClkCycles, LQASizes, LQB, LQBSizes, 
+                                     LQLocks, TaskIdCurrent, TasksFinished, 
+                                     RTStarted, RTStopped, Futures, FuturePush, 
+                                     FuturesBlocked, FutureWorkers, 
+                                     FDReadsAvailable, FDWritesAvailable, 
+                                     KQueues, TaskReadyAges, RoundRobinToken, 
+                                     tid_, task, HasWork, I_, J, K, L, kq_out, 
+                                     current_time, lqbuf, wr, tid, I, fildes_, 
+                                     Steps_, fildes, Steps, PolledRead >>
 
 OtherFutureContinue(self) == /\ pc[self] = "OtherFutureContinue"
                              /\ Steps' = [Steps EXCEPT ![self] = Steps[self] + 1]
@@ -3290,16 +4111,20 @@ OtherFutureContinue(self) == /\ pc[self] = "OtherFutureContinue"
                                    /\ Futures' = [Futures EXCEPT ![self] = FSReturned]
                                    /\ pc' = [pc EXCEPT ![self] = "Cont4"]
                                    /\ UNCHANGED FuturesBlocked
+                                \/ /\ Futures' = [Futures EXCEPT ![self] = FSReturned]
+                                   /\ pc' = [pc EXCEPT ![self] = "Cont5"]
+                                   /\ UNCHANGED <<FuturesBlocked, FDReadsAvailable, PolledRead>>
                                 \/ /\ pc' = [pc EXCEPT ![self] = "OtherFutureDone"]
                                    /\ UNCHANGED <<Futures, FuturesBlocked, FDReadsAvailable, PolledRead>>
                              /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, 
-                                             GQBSize, GQLock, LQA, LQAClock, 
-                                             LQASizes, LQB, LQBSizes, LQLocks, 
+                                             GQBSize, GQPPPointer, GQLock, LQA, 
+                                             LQAClock, ClkCycles, LQASizes, 
+                                             LQB, LQBSizes, LQLocks, 
                                              TaskIdCurrent, TasksFinished, 
                                              RTStarted, RTStopped, FuturePush, 
                                              FutureWorkers, FDWritesAvailable, 
-                                             KQueues, KContinueLock, 
-                                             Worker_Wakeup, tid_, task, 
+                                             KQueues, TaskReadyAges, 
+                                             RoundRobinToken, tid_, task, 
                                              HasWork, I_, J, K, L, kq_out, 
                                              current_time, lqbuf, wr, tid, I, 
                                              fildes_, Steps_, fildes >>
@@ -3307,137 +4132,99 @@ OtherFutureContinue(self) == /\ pc[self] = "OtherFutureContinue"
 Cont1(self) == /\ pc[self] = "Cont1"
                /\ Futures[self] = FSPolling
                /\ pc' = [pc EXCEPT ![self] = "OtherFutureStarted"]
-               /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, GQLock, 
-                               LQA, LQAClock, LQASizes, LQB, LQBSizes, LQLocks, 
-                               TaskIdCurrent, TasksFinished, RTStarted, 
-                               RTStopped, Futures, FuturePush, FuturesBlocked, 
-                               FutureWorkers, FDReadsAvailable, 
-                               FDWritesAvailable, KQueues, KContinueLock, 
-                               Worker_Wakeup, tid_, task, HasWork, I_, J, K, L, 
-                               kq_out, current_time, lqbuf, wr, tid, I, 
-                               fildes_, Steps_, fildes, Steps, PolledRead >>
+               /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
+                               GQPPPointer, GQLock, LQA, LQAClock, ClkCycles, 
+                               LQASizes, LQB, LQBSizes, LQLocks, TaskIdCurrent, 
+                               TasksFinished, RTStarted, RTStopped, Futures, 
+                               FuturePush, FuturesBlocked, FutureWorkers, 
+                               FDReadsAvailable, FDWritesAvailable, KQueues, 
+                               TaskReadyAges, RoundRobinToken, tid_, task, 
+                               HasWork, I_, J, K, L, kq_out, current_time, 
+                               lqbuf, wr, tid, I, fildes_, Steps_, fildes, 
+                               Steps, PolledRead >>
 
 Cont2(self) == /\ pc[self] = "Cont2"
                /\ Futures[self] = FSPolling
                /\ pc' = [pc EXCEPT ![self] = "OtherFutureStarted"]
-               /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, GQLock, 
-                               LQA, LQAClock, LQASizes, LQB, LQBSizes, LQLocks, 
-                               TaskIdCurrent, TasksFinished, RTStarted, 
-                               RTStopped, Futures, FuturePush, FuturesBlocked, 
-                               FutureWorkers, FDReadsAvailable, 
-                               FDWritesAvailable, KQueues, KContinueLock, 
-                               Worker_Wakeup, tid_, task, HasWork, I_, J, K, L, 
-                               kq_out, current_time, lqbuf, wr, tid, I, 
-                               fildes_, Steps_, fildes, Steps, PolledRead >>
+               /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
+                               GQPPPointer, GQLock, LQA, LQAClock, ClkCycles, 
+                               LQASizes, LQB, LQBSizes, LQLocks, TaskIdCurrent, 
+                               TasksFinished, RTStarted, RTStopped, Futures, 
+                               FuturePush, FuturesBlocked, FutureWorkers, 
+                               FDReadsAvailable, FDWritesAvailable, KQueues, 
+                               TaskReadyAges, RoundRobinToken, tid_, task, 
+                               HasWork, I_, J, K, L, kq_out, current_time, 
+                               lqbuf, wr, tid, I, fildes_, Steps_, fildes, 
+                               Steps, PolledRead >>
 
 Cont3(self) == /\ pc[self] = "Cont3"
                /\ Futures[self] = FSPolling
                /\ pc' = [pc EXCEPT ![self] = "OtherFutureStarted"]
-               /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, GQLock, 
-                               LQA, LQAClock, LQASizes, LQB, LQBSizes, LQLocks, 
-                               TaskIdCurrent, TasksFinished, RTStarted, 
-                               RTStopped, Futures, FuturePush, FuturesBlocked, 
-                               FutureWorkers, FDReadsAvailable, 
-                               FDWritesAvailable, KQueues, KContinueLock, 
-                               Worker_Wakeup, tid_, task, HasWork, I_, J, K, L, 
-                               kq_out, current_time, lqbuf, wr, tid, I, 
-                               fildes_, Steps_, fildes, Steps, PolledRead >>
+               /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
+                               GQPPPointer, GQLock, LQA, LQAClock, ClkCycles, 
+                               LQASizes, LQB, LQBSizes, LQLocks, TaskIdCurrent, 
+                               TasksFinished, RTStarted, RTStopped, Futures, 
+                               FuturePush, FuturesBlocked, FutureWorkers, 
+                               FDReadsAvailable, FDWritesAvailable, KQueues, 
+                               TaskReadyAges, RoundRobinToken, tid_, task, 
+                               HasWork, I_, J, K, L, kq_out, current_time, 
+                               lqbuf, wr, tid, I, fildes_, Steps_, fildes, 
+                               Steps, PolledRead >>
 
 Cont4(self) == /\ pc[self] = "Cont4"
                /\ Futures[self] = FSPolling
                /\ pc' = [pc EXCEPT ![self] = "OtherFutureStarted"]
-               /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, GQLock, 
-                               LQA, LQAClock, LQASizes, LQB, LQBSizes, LQLocks, 
-                               TaskIdCurrent, TasksFinished, RTStarted, 
-                               RTStopped, Futures, FuturePush, FuturesBlocked, 
-                               FutureWorkers, FDReadsAvailable, 
-                               FDWritesAvailable, KQueues, KContinueLock, 
-                               Worker_Wakeup, tid_, task, HasWork, I_, J, K, L, 
-                               kq_out, current_time, lqbuf, wr, tid, I, 
-                               fildes_, Steps_, fildes, Steps, PolledRead >>
+               /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
+                               GQPPPointer, GQLock, LQA, LQAClock, ClkCycles, 
+                               LQASizes, LQB, LQBSizes, LQLocks, TaskIdCurrent, 
+                               TasksFinished, RTStarted, RTStopped, Futures, 
+                               FuturePush, FuturesBlocked, FutureWorkers, 
+                               FDReadsAvailable, FDWritesAvailable, KQueues, 
+                               TaskReadyAges, RoundRobinToken, tid_, task, 
+                               HasWork, I_, J, K, L, kq_out, current_time, 
+                               lqbuf, wr, tid, I, fildes_, Steps_, fildes, 
+                               Steps, PolledRead >>
+
+Cont5(self) == /\ pc[self] = "Cont5"
+               /\ Futures[self] = FSPolling
+               /\ pc' = [pc EXCEPT ![self] = "OtherFutureStarted"]
+               /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
+                               GQPPPointer, GQLock, LQA, LQAClock, ClkCycles, 
+                               LQASizes, LQB, LQBSizes, LQLocks, TaskIdCurrent, 
+                               TasksFinished, RTStarted, RTStopped, Futures, 
+                               FuturePush, FuturesBlocked, FutureWorkers, 
+                               FDReadsAvailable, FDWritesAvailable, KQueues, 
+                               TaskReadyAges, RoundRobinToken, tid_, task, 
+                               HasWork, I_, J, K, L, kq_out, current_time, 
+                               lqbuf, wr, tid, I, fildes_, Steps_, fildes, 
+                               Steps, PolledRead >>
 
 OtherFutureDone(self) == /\ pc[self] = "OtherFutureDone"
                          /\ Futures' = [Futures EXCEPT ![self] = FSCompleted]
                          /\ pc' = [pc EXCEPT ![self] = "Done"]
                          /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, 
-                                         GQLock, LQA, LQAClock, LQASizes, LQB, 
-                                         LQBSizes, LQLocks, TaskIdCurrent, 
-                                         TasksFinished, RTStarted, RTStopped, 
-                                         FuturePush, FuturesBlocked, 
-                                         FutureWorkers, FDReadsAvailable, 
-                                         FDWritesAvailable, KQueues, 
-                                         KContinueLock, Worker_Wakeup, tid_, 
-                                         task, HasWork, I_, J, K, L, kq_out, 
-                                         current_time, lqbuf, wr, tid, I, 
-                                         fildes_, Steps_, fildes, Steps, 
-                                         PolledRead >>
+                                         GQPPPointer, GQLock, LQA, LQAClock, 
+                                         ClkCycles, LQASizes, LQB, LQBSizes, 
+                                         LQLocks, TaskIdCurrent, TasksFinished, 
+                                         RTStarted, RTStopped, FuturePush, 
+                                         FuturesBlocked, FutureWorkers, 
+                                         FDReadsAvailable, FDWritesAvailable, 
+                                         KQueues, TaskReadyAges, 
+                                         RoundRobinToken, tid_, task, HasWork, 
+                                         I_, J, K, L, kq_out, current_time, 
+                                         lqbuf, wr, tid, I, fildes_, Steps_, 
+                                         fildes, Steps, PolledRead >>
 
 OtherF(self) == OtherFutureStarted(self) \/ AwaitInLoop(self)
                    \/ OtherFutureContinue(self) \/ Cont1(self)
                    \/ Cont2(self) \/ Cont3(self) \/ Cont4(self)
-                   \/ OtherFutureDone(self)
-
-KEntry == /\ pc[KernelProcessId] = "KEntry"
-          /\ RTStarted = TRUE
-          /\ pc' = [pc EXCEPT ![KernelProcessId] = "KLoop"]
-          /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, GQLock, LQA, 
-                          LQAClock, LQASizes, LQB, LQBSizes, LQLocks, 
-                          TaskIdCurrent, TasksFinished, RTStarted, RTStopped, 
-                          Futures, FuturePush, FuturesBlocked, FutureWorkers, 
-                          FDReadsAvailable, FDWritesAvailable, KQueues, 
-                          KContinueLock, Worker_Wakeup, tid_, task, HasWork, 
-                          I_, J, K, L, kq_out, current_time, lqbuf, wr, tid, I, 
-                          fildes_, Steps_, fildes, Steps, PolledRead >>
-
-KLoop == /\ pc[KernelProcessId] = "KLoop"
-         /\ IF ~ RTStopped
-               THEN /\ KContinueLock = TRUE
-                    /\ FDReadsAvailable' = [x \in DOMAIN FDReadsAvailable |-> FDReadsAvailable[x] + 64]
-                    /\ FDWritesAvailable' = [x \in DOMAIN FDWritesAvailable |-> FDWritesAvailable[x] + 16]
-                    /\ KQueues' =            [kq \in DOMAIN KQueues |->
-                                      IF KQueues[kq] = NullKQ
-                                      THEN NullKQ
-                                      ELSE LET
-                                          IndUpd == [p \in DOMAIN KQueues[kq].waiting |-> [index |-> p, data |->
-                                              (CASE KQueues[kq].waiting[p].kind = KQWaitKindRead -> FDReadsAvailable'[KQueues[kq].waiting[p].fd]
-                                                [] KQueues[kq].waiting[p].kind = KQWaitKindWrite -> FDWritesAvailable'[KQueues[kq].waiting[p].fd]) ]]
-                                      IN [waiting |-> [p \in DOMAIN KQueues[kq].waiting \ {IndUpd[p].index : p \in DOMAIN IndUpd} |-> KQueues[kq].waiting[p]],
-                                          available |->
-                                              KQueues[kq].available \o [p \in DOMAIN IndUpd |-> [KQueues[kq].waiting[IndUpd[p].index] EXCEPT !.data = IndUpd[p].data, !.eof = FALSE]]]
-                                  ]
-                    /\ KContinueLock' = FALSE
-                    /\ Worker_Wakeup' = TRUE
-                    /\ pc' = [pc EXCEPT ![KernelProcessId] = "KLoop"]
-               ELSE /\ pc' = [pc EXCEPT ![KernelProcessId] = "KDone"]
-                    /\ UNCHANGED << FDReadsAvailable, FDWritesAvailable, 
-                                    KQueues, KContinueLock, Worker_Wakeup >>
-         /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, GQLock, LQA, 
-                         LQAClock, LQASizes, LQB, LQBSizes, LQLocks, 
-                         TaskIdCurrent, TasksFinished, RTStarted, RTStopped, 
-                         Futures, FuturePush, FuturesBlocked, FutureWorkers, 
-                         tid_, task, HasWork, I_, J, K, L, kq_out, 
-                         current_time, lqbuf, wr, tid, I, fildes_, Steps_, 
-                         fildes, Steps, PolledRead >>
-
-KDone == /\ pc[KernelProcessId] = "KDone"
-         /\ TRUE
-         /\ pc' = [pc EXCEPT ![KernelProcessId] = "Done"]
-         /\ UNCHANGED << GQA, GQAFirst, GQALast, GQB, GQBSize, GQLock, LQA, 
-                         LQAClock, LQASizes, LQB, LQBSizes, LQLocks, 
-                         TaskIdCurrent, TasksFinished, RTStarted, RTStopped, 
-                         Futures, FuturePush, FuturesBlocked, FutureWorkers, 
-                         FDReadsAvailable, FDWritesAvailable, KQueues, 
-                         KContinueLock, Worker_Wakeup, tid_, task, HasWork, I_, 
-                         J, K, L, kq_out, current_time, lqbuf, wr, tid, I, 
-                         fildes_, Steps_, fildes, Steps, PolledRead >>
-
-Kernel == KEntry \/ KLoop \/ KDone
+                   \/ Cont5(self) \/ OtherFutureDone(self)
 
 (* Allow infinite stuttering to prevent deadlock on termination. *)
 Terminating == /\ \A self \in ProcSet: pc[self] = "Done"
                /\ UNCHANGED vars
 
-Next == RTSpawn \/ Kernel
+Next == RTSpawn
            \/ (\E self \in Workers: WorkerThread(self))
            \/ (\E self \in TaskPusherProcesses: TaskPusherProcess(self))
            \/ (\E self \in {RootFuture}: RF(self))
@@ -3450,7 +4237,6 @@ Spec == /\ Init /\ [][Next]_vars
         /\ \A self \in TaskPusherProcesses : SF_vars(TaskPusherProcess(self))
         /\ \A self \in {RootFuture} : SF_vars(RF(self))
         /\ \A self \in OtherFutures : SF_vars(OtherF(self))
-        /\ SF_vars(Kernel)
 
 Termination == <>(\A self \in ProcSet: pc[self] = "Done")
 
@@ -3458,5 +4244,5 @@ Termination == <>(\A self \in ProcSet: pc[self] = "Done")
 
 =============================================================================
 \* Modification History
-\* Last modified Thu Jun 19 14:48:48 CEST 2025 by dinu
+\* Last modified Sat Jun 21 14:48:22 CEST 2025 by dinu
 \* Created Sat May 24 12:56:52 CEST 2025 by dinu

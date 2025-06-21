@@ -38,7 +38,7 @@ private
    type Poll_Result_Buffer is array (1 .. 1024) of Poll_Result
    with Convention => C;
    type Poll_Results is record
-      Count  : Integer; -- Number of events returned
+      Count  : Integer := 0; -- Number of events returned
       Events : Poll_Result_Buffer; -- Array of events
    end record;
 
@@ -125,6 +125,7 @@ private
 
    protected Global_Task_Queue is
       function Has_Work_Left return Boolean;
+      function Need_To_Poll_IO return Boolean;
 
       procedure Push (TI : in out Local_Worker_Task_Info_Array);
       procedure Push_One (TI : Task_Info_Access);
@@ -135,13 +136,16 @@ private
       procedure Try_Pull
         (TI : in out Local_Worker_Task_Info_Array; Count : out Natural);
 
+      procedure Push_Pull
+        (TI : in out Local_Worker_Task_Info_Array; Size : Natural);
+
       procedure Push_QB (TI : Local_Worker_Task_Info_Array);
       procedure Process_QB (Poll_R : Poll_Results);
       -- Pulls tasks from the global queue into the local array, enough to fill half of it
 
       procedure Print_States;
    private
-      Global_TI_Array : Global_Task_Info_Array :=
+      Global_TI_Array  : Global_Task_Info_Array :=
         (others =>
            new Task_Info'
              (Fut          => Null_Future,
@@ -149,7 +153,7 @@ private
               Blocked_Time => null,
               Blocked_IO   => null,
               T_Id         => 0));
-      First, Last     : Natural := 0;
+      First, Last, Ptr : Natural := 0;
 
       Global_TI_B_Array : Global_Task_Info_Array :=
         (others =>
@@ -162,6 +166,8 @@ private
       Size_QB           : Natural := 0;
 
       IO_Q : IO_Blocked_Queue_Access := null;
+
+      Last_Poll_Time : Ada.Calendar.Time := Ada.Calendar.Clock;
    end Global_Task_Queue;
 
    protected type Worker_Task_Queue is
@@ -170,7 +176,8 @@ private
       procedure Push (TI : Task_Info_Access);
       procedure Push_QB (TI : Task_Info_Access);
       procedure Process_QB;
-      procedure Process_QB_And_Fetch_First (TI : out Task_Info_Access; Set : out Boolean);
+      procedure Process_QB_And_Fetch_First
+        (TI : out Task_Info_Access; Set : out Boolean);
       procedure Flush_Blocked;
       procedure Attempt_Enqueue_From_Global (Count : out Natural);
 
@@ -191,6 +198,7 @@ private
       Q               : Local_Worker_Task_Info_Array;
       Size            : Natural := 0;
       Clock_Position  : Natural := 0;
+      Clock_Cycles    : Natural := 0;
       Stealable_Tasks : Natural := Local_Worker_Queue_Size_Total;
       QB              :
         Local_Worker_Task_Info_Array; -- Buffer for blocked tasks
