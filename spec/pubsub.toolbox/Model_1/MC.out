@@ -1,0 +1,968 @@
+@!@!@STARTMSG 2262:0 @!@!@
+TLC2 Version 2.20 of Day Month 20?? (rev: 96056d9)
+@!@!@ENDMSG 2262 @!@!@
+@!@!@STARTMSG 2187:0 @!@!@
+Running breadth-first search Model-Checking with fp 97 and seed 6268254360174749192 with 4 workers on 8 cores with 2914MB heap and 6552MB offheap memory [pid: 12200] (Mac OS X 10.16 x86_64, AdoptOpenJDK 14.0.1 x86_64, OffHeapDiskFPSet, DiskStateQueue).
+@!@!@ENDMSG 2187 @!@!@
+@!@!@STARTMSG 2220:0 @!@!@
+Starting SANY...
+@!@!@ENDMSG 2220 @!@!@
+Parsing file /Users/dinu/rp/rp/spec/pubsub.toolbox/Model_1/MC.tla
+Parsing file /Users/dinu/rp/rp/spec/pubsub.toolbox/Model_1/pubsub.tla
+Parsing file /private/var/folders/y7/381l32yj70gc7txzlnr5dy4h0000gp/T/AppTranslocation/204147B0-129A-4878-9992-6F485A4A2009/d/TLA+ Toolbox.app/Contents/Eclipse/plugins/org.lamport.tlatools_1.0.0.202505200356/tla2sany/StandardModules/TLC.tla
+Parsing file /private/var/folders/y7/381l32yj70gc7txzlnr5dy4h0000gp/T/AppTranslocation/204147B0-129A-4878-9992-6F485A4A2009/d/TLA+ Toolbox.app/Contents/Eclipse/plugins/org.lamport.tlatools_1.0.0.202505200356/tla2sany/StandardModules/Naturals.tla
+Parsing file /private/var/folders/y7/381l32yj70gc7txzlnr5dy4h0000gp/T/AppTranslocation/204147B0-129A-4878-9992-6F485A4A2009/d/TLA+ Toolbox.app/Contents/Eclipse/plugins/org.lamport.tlatools_1.0.0.202505200356/tla2sany/StandardModules/Integers.tla
+Parsing file /private/var/folders/y7/381l32yj70gc7txzlnr5dy4h0000gp/T/AppTranslocation/204147B0-129A-4878-9992-6F485A4A2009/d/TLA+ Toolbox.app/Contents/Eclipse/plugins/org.lamport.tlatools_1.0.0.202505200356/tla2sany/StandardModules/Sequences.tla
+Parsing file /private/var/folders/y7/381l32yj70gc7txzlnr5dy4h0000gp/T/AppTranslocation/204147B0-129A-4878-9992-6F485A4A2009/d/TLA+ Toolbox.app/Contents/Eclipse/plugins/org.lamport.tlatools_1.0.0.202505200356/tla2sany/StandardModules/FiniteSets.tla
+Semantic processing of module Naturals
+Semantic processing of module Integers
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module pubsub
+Semantic processing of module MC
+@!@!@STARTMSG 2219:0 @!@!@
+SANY finished.
+@!@!@ENDMSG 2219 @!@!@
+@!@!@STARTMSG 2185:0 @!@!@
+Starting... (2025-06-22 16:56:34)
+@!@!@ENDMSG 2185 @!@!@
+@!@!@STARTMSG 2212:0 @!@!@
+Implied-temporal checking--satisfiability problem has 20 branches.
+@!@!@ENDMSG 2212 @!@!@
+@!@!@STARTMSG 2189:0 @!@!@
+Computing initial states...
+@!@!@ENDMSG 2189 @!@!@
+@!@!@STARTMSG 2190:0 @!@!@
+Finished computing initial states: 1 distinct state generated at 2025-06-22 16:56:41.
+@!@!@ENDMSG 2190 @!@!@
+@!@!@STARTMSG 2200:0 @!@!@
+Progress(11) at 2025-06-22 16:56:44: 302 states generated (302 s/min), 201 distinct states found (201 ds/min), 101 states left on queue.
+@!@!@ENDMSG 2200 @!@!@
+@!@!@STARTMSG 2200:0 @!@!@
+Progress(15) at 2025-06-22 16:57:44: 5,863 states generated (5,561 s/min), 4,145 distinct states found (3,944 ds/min), 2,149 states left on queue.
+@!@!@ENDMSG 2200 @!@!@
+@!@!@STARTMSG 2200:0 @!@!@
+Progress(15) at 2025-06-22 16:58:44: 7,835 states generated (1,972 s/min), 5,534 distinct states found (1,389 ds/min), 2,866 states left on queue.
+@!@!@ENDMSG 2200 @!@!@
+@!@!@STARTMSG 2200:0 @!@!@
+Progress(18) at 2025-06-22 16:59:44: 61,569 states generated (53,734 s/min), 38,007 distinct states found (32,473 ds/min), 16,660 states left on queue.
+@!@!@ENDMSG 2200 @!@!@
+@!@!@STARTMSG 2201:0 @!@!@
+The coverage statistics at 2025-06-22 16:59:44 (see https://explain.tlapl.us/module-coverage-statistics for how to interpret the following statistics).
+@!@!@ENDMSG 2201 @!@!@
+@!@!@STARTMSG 2779:0 @!@!@
+<SentEnd line 84, col 26 to line 84, col 32 of module pubsub>: 2
+@!@!@ENDMSG 2779 @!@!@
+@!@!@STARTMSG 2779:0 @!@!@
+<VC line 84, col 18 to line 84, col 19 of module pubsub>: 10
+@!@!@ENDMSG 2779 @!@!@
+@!@!@STARTMSG 2779:0 @!@!@
+<VS line 84, col 22 to line 84, col 23 of module pubsub>: 100
+@!@!@ENDMSG 2779 @!@!@
+@!@!@STARTMSG 2779:0 @!@!@
+<MissedVersions line 84, col 49 to line 84, col 62 of module pubsub>: 4320
+@!@!@ENDMSG 2779 @!@!@
+@!@!@STARTMSG 2779:0 @!@!@
+<Q line 84, col 15 to line 84, col 15 of module pubsub>: 10
+@!@!@ENDMSG 2779 @!@!@
+@!@!@STARTMSG 2779:0 @!@!@
+<pc line 84, col 11 to line 84, col 12 of module pubsub>: 5
+@!@!@ENDMSG 2779 @!@!@
+@!@!@STARTMSG 2779:0 @!@!@
+<sent line 96, col 10 to line 96, col 13 of module pubsub>: 10
+@!@!@ENDMSG 2779 @!@!@
+@!@!@STARTMSG 2779:0 @!@!@
+<SeenVersions line 84, col 35 to line 84, col 46 of module pubsub>: 26087
+@!@!@ENDMSG 2779 @!@!@
+@!@!@STARTMSG 2773:0 @!@!@
+<Init line 102, col 1 to line 102, col 4 of module pubsub>: 1:1
+@!@!@ENDMSG 2773 @!@!@
+@!@!@STARTMSG 2775:0 @!@!@
+  line 103, col 16 to line 103, col 41 of module pubsub: 1:4
+@!@!@ENDMSG 2775 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 103, col 23 to line 103, col 24 of module pubsub: 1
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2775:0 @!@!@
+  line 105, col 17 to line 105, col 41 of module pubsub: 1:2
+@!@!@ENDMSG 2775 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 105, col 24 to line 105, col 34 of module pubsub: 1
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 106, col 12 to line 106, col 26 of module pubsub: 1
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2775:0 @!@!@
+  line 107, col 27 to line 107, col 76 of module pubsub: 1:2
+@!@!@ENDMSG 2775 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 107, col 34 to line 107, col 44 of module pubsub: 1
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2775:0 @!@!@
+  line 108, col 29 to line 108, col 78 of module pubsub: 1:2
+@!@!@ENDMSG 2775 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 108, col 36 to line 108, col 46 of module pubsub: 1
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2775:0 @!@!@
+  line 110, col 19 to line 110, col 45 of module pubsub: 1:1
+@!@!@ENDMSG 2775 @!@!@
+@!@!@STARTMSG 2775:0 @!@!@
+  |line 110, col 29 to line 110, col 38 of module pubsub: 1:2
+@!@!@ENDMSG 2775 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  ||line 110, col 30 to line 110, col 37 of module pubsub: 1
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 111, col 12 to line 112, col 78 of module pubsub: 1
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2775:0 @!@!@
+  |line 111, col 17 to line 112, col 78 of module pubsub: 1:3
+@!@!@ENDMSG 2775 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  ||line 111, col 27 to line 111, col 33 of module pubsub: 1
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2772:0 @!@!@
+<SenderWhileLoop line 114, col 1 to line 114, col 21 of module pubsub>: 7704:17368
+@!@!@ENDMSG 2772 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 114, col 29 to line 114, col 56 of module pubsub: 38790
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 114, col 29 to line 114, col 36 of module pubsub: 21422
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 115, col 32 to line 115, col 55 of module pubsub: 17368
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 116, col 37 to line 119, col 84 of module pubsub: 10581
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 120, col 40 to line 120, col 78 of module pubsub: 6787
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 121, col 40 to line 121, col 66 of module pubsub: 6787
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 122, col 29 to line 123, col 58 of module pubsub: 17368
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2772:0 @!@!@
+<SenderEnd line 125, col 1 to line 125, col 15 of module pubsub>: 1172:2965
+@!@!@ENDMSG 2772 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 125, col 23 to line 125, col 44 of module pubsub: 24387
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 125, col 23 to line 125, col 30 of module pubsub: 21423
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 126, col 23 to line 126, col 37 of module pubsub: 2965
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 127, col 23 to line 127, col 56 of module pubsub: 2966
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 128, col 23 to line 129, col 42 of module pubsub: 2965
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2772:0 @!@!@
+<RecvLoop line 133, col 1 to line 133, col 14 of module pubsub>: 29153:41456
+@!@!@ENDMSG 2772 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 133, col 22 to line 133, col 42 of module pubsub: 84312
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 133, col 22 to line 133, col 29 of module pubsub: 42852
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 134, col 25 to line 134, col 50 of module pubsub: 42852
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 134, col 25 to line 134, col 33 of module pubsub: 42852
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 134, col 38 to line 134, col 50 of module pubsub: 2180
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 135, col 33 to line 135, col 45 of module pubsub: 41458
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 135, col 33 to line 135, col 40 of module pubsub: 42850
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 135, col 44 to line 135, col 45 of module pubsub: 42850
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 136, col 33 to line 138, col 109 of module pubsub: 41458
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 136, col 51 to line 138, col 109 of module pubsub: 41458
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  ||line 136, col 52 to line 136, col 65 of module pubsub: 41458
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  ||line 136, col 74 to line 138, col 108 of module pubsub: 41454
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  ||line 136, col 84 to line 138, col 108 of module pubsub: 41458
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |||line 136, col 87 to line 136, col 121 of module pubsub: 41458
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  ||||line 136, col 87 to line 136, col 96 of module pubsub: 41458
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  ||||line 136, col 101 to line 136, col 121 of module pubsub: 41254
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |||line 137, col 89 to line 137, col 155 of module pubsub: 13318
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2775:0 @!@!@
+  ||||line 137, col 89 to line 137, col 131 of module pubsub: 13318:32904
+@!@!@ENDMSG 2775 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |||||line 137, col 96 to line 137, col 121 of module pubsub: 13318
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  ||||line 137, col 136 to line 137, col 155 of module pubsub: 13318
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |||line 138, col 89 to line 138, col 108 of module pubsub: 28140
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 139, col 33 to line 141, col 77 of module pubsub: 41458
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 139, col 39 to line 141, col 77 of module pubsub: 41458
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  ||line 139, col 40 to line 139, col 41 of module pubsub: 41458
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  ||line 139, col 50 to line 141, col 76 of module pubsub: 41456
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  ||line 139, col 60 to line 141, col 76 of module pubsub: 41458
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |||line 139, col 63 to line 139, col 97 of module pubsub: 41458
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  ||||line 139, col 63 to line 139, col 72 of module pubsub: 41458
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  ||||line 139, col 77 to line 139, col 97 of module pubsub: 41254
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |||line 140, col 65 to line 140, col 78 of module pubsub: 13318
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |||line 141, col 65 to line 141, col 76 of module pubsub: 28143
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 142, col 33 to line 142, col 95 of module pubsub: 41462
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 142, col 49 to line 142, col 95 of module pubsub: 41462
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  ||line 142, col 50 to line 142, col 61 of module pubsub: 41462
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  ||line 142, col 72 to line 142, col 75 of module pubsub: 41462
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  ||line 142, col 78 to line 142, col 86 of module pubsub: 41462
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  ||line 142, col 91 to line 142, col 94 of module pubsub: 41462
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 143, col 33 to line 143, col 70 of module pubsub: 41462
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 143, col 39 to line 143, col 70 of module pubsub: 41462
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 144, col 33 to line 144, col 66 of module pubsub: 2
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 145, col 33 to line 145, col 80 of module pubsub: 2
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 146, col 22 to line 146, col 57 of module pubsub: 41460
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2772:0 @!@!@
+<Terminating line 151, col 1 to line 151, col 11 of module pubsub>: 0:0
+@!@!@ENDMSG 2772 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 151, col 40 to line 151, col 56 of module pubsub: 22518
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 151, col 31 to line 151, col 37 of module pubsub: 21428
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 152, col 19 to line 152, col 32 of module pubsub: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2774:0 @!@!@
+<SafetySeenOrMissed line 87, col 1 to line 87, col 18 of module pubsub>
+@!@!@ENDMSG 2774 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 87, col 23 to line 87, col 108 of module pubsub: 38035
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 87, col 45 to line 87, col 108 of module pubsub: 76070
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  ||line 87, col 64 to line 87, col 108 of module pubsub: 760700
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |||line 87, col 64 to line 87, col 81 of module pubsub: 760700
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |||line 87, col 86 to line 87, col 108 of module pubsub: 218354
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  ||line 87, col 54 to line 87, col 61 of module pubsub: 76070
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 87, col 32 to line 87, col 42 of module pubsub: 38035
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2774:0 @!@!@
+<TypeInvariant line 90, col 1 to line 90, col 13 of module pubsub>
+@!@!@ENDMSG 2774 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 91, col 5 to line 94, col 40 of module pubsub: 38037
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2202:0 @!@!@
+End of statistics.
+@!@!@ENDMSG 2202 @!@!@
+@!@!@STARTMSG 2200:0 @!@!@
+Progress(20) at 2025-06-22 17:00:44: 159,028 states generated (97,459 s/min), 87,807 distinct states found (49,800 ds/min), 31,048 states left on queue.
+@!@!@ENDMSG 2200 @!@!@
+@!@!@STARTMSG 2200:0 @!@!@
+Progress(21) at 2025-06-22 17:01:45: 230,904 states generated (71,876 s/min), 121,907 distinct states found (34,100 ds/min), 38,165 states left on queue.
+@!@!@ENDMSG 2200 @!@!@
+@!@!@STARTMSG 2200:0 @!@!@
+Progress(23) at 2025-06-22 17:02:45: 435,271 states generated (204,367 s/min), 211,000 distinct states found (89,093 ds/min), 46,353 states left on queue.
+@!@!@ENDMSG 2200 @!@!@
+@!@!@STARTMSG 2200:0 @!@!@
+Progress(25) at 2025-06-22 17:03:45: 678,347 states generated (243,076 s/min), 309,291 distinct states found (98,291 ds/min), 36,368 states left on queue.
+@!@!@ENDMSG 2200 @!@!@
+@!@!@STARTMSG 2201:0 @!@!@
+The coverage statistics at 2025-06-22 17:03:45 (see https://explain.tlapl.us/module-coverage-statistics for how to interpret the following statistics).
+@!@!@ENDMSG 2201 @!@!@
+@!@!@STARTMSG 2779:0 @!@!@
+<SentEnd line 84, col 26 to line 84, col 32 of module pubsub>: 2
+@!@!@ENDMSG 2779 @!@!@
+@!@!@STARTMSG 2779:0 @!@!@
+<VC line 84, col 18 to line 84, col 19 of module pubsub>: 10
+@!@!@ENDMSG 2779 @!@!@
+@!@!@STARTMSG 2779:0 @!@!@
+<VS line 84, col 22 to line 84, col 23 of module pubsub>: 101
+@!@!@ENDMSG 2779 @!@!@
+@!@!@STARTMSG 2779:0 @!@!@
+<MissedVersions line 84, col 49 to line 84, col 62 of module pubsub>: 8854
+@!@!@ENDMSG 2779 @!@!@
+@!@!@STARTMSG 2779:0 @!@!@
+<Q line 84, col 15 to line 84, col 15 of module pubsub>: 10
+@!@!@ENDMSG 2779 @!@!@
+@!@!@STARTMSG 2779:0 @!@!@
+<pc line 84, col 11 to line 84, col 12 of module pubsub>: 6
+@!@!@ENDMSG 2779 @!@!@
+@!@!@STARTMSG 2779:0 @!@!@
+<sent line 96, col 10 to line 96, col 13 of module pubsub>: 10
+@!@!@ENDMSG 2779 @!@!@
+@!@!@STARTMSG 2779:0 @!@!@
+<SeenVersions line 84, col 35 to line 84, col 46 of module pubsub>: 110699
+@!@!@ENDMSG 2779 @!@!@
+@!@!@STARTMSG 2773:0 @!@!@
+<Init line 102, col 1 to line 102, col 4 of module pubsub>: 1:1
+@!@!@ENDMSG 2773 @!@!@
+@!@!@STARTMSG 2775:0 @!@!@
+  line 103, col 16 to line 103, col 41 of module pubsub: 1:4
+@!@!@ENDMSG 2775 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 103, col 23 to line 103, col 24 of module pubsub: 1
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2775:0 @!@!@
+  line 105, col 17 to line 105, col 41 of module pubsub: 1:2
+@!@!@ENDMSG 2775 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 105, col 24 to line 105, col 34 of module pubsub: 1
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 106, col 12 to line 106, col 26 of module pubsub: 1
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2775:0 @!@!@
+  line 107, col 27 to line 107, col 76 of module pubsub: 1:2
+@!@!@ENDMSG 2775 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 107, col 34 to line 107, col 44 of module pubsub: 1
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2775:0 @!@!@
+  line 108, col 29 to line 108, col 78 of module pubsub: 1:2
+@!@!@ENDMSG 2775 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 108, col 36 to line 108, col 46 of module pubsub: 1
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2775:0 @!@!@
+  line 110, col 19 to line 110, col 45 of module pubsub: 1:1
+@!@!@ENDMSG 2775 @!@!@
+@!@!@STARTMSG 2775:0 @!@!@
+  |line 110, col 29 to line 110, col 38 of module pubsub: 1:2
+@!@!@ENDMSG 2775 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  ||line 110, col 30 to line 110, col 37 of module pubsub: 1
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 111, col 12 to line 112, col 78 of module pubsub: 1
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2775:0 @!@!@
+  |line 111, col 17 to line 112, col 78 of module pubsub: 1:3
+@!@!@ENDMSG 2775 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  ||line 111, col 27 to line 111, col 33 of module pubsub: 1
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2772:0 @!@!@
+<SenderWhileLoop line 114, col 1 to line 114, col 21 of module pubsub>: 18820:121984
+@!@!@ENDMSG 2772 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 114, col 29 to line 114, col 56 of module pubsub: 394977
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 114, col 29 to line 114, col 36 of module pubsub: 272993
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 115, col 32 to line 115, col 55 of module pubsub: 121984
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 116, col 37 to line 119, col 84 of module pubsub: 33609
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 120, col 40 to line 120, col 78 of module pubsub: 88375
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 121, col 40 to line 121, col 66 of module pubsub: 88375
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 122, col 29 to line 123, col 58 of module pubsub: 121984
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2772:0 @!@!@
+<SenderEnd line 125, col 1 to line 125, col 15 of module pubsub>: 7574:78155
+@!@!@ENDMSG 2772 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 125, col 23 to line 125, col 44 of module pubsub: 351149
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 125, col 23 to line 125, col 30 of module pubsub: 272994
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 126, col 23 to line 126, col 37 of module pubsub: 78155
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 127, col 23 to line 127, col 56 of module pubsub: 78155
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 128, col 23 to line 129, col 42 of module pubsub: 78155
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2772:0 @!@!@
+<RecvLoop line 133, col 1 to line 133, col 14 of module pubsub>: 282901:478398
+@!@!@ENDMSG 2772 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 133, col 22 to line 133, col 42 of module pubsub: 1024395
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 133, col 22 to line 133, col 29 of module pubsub: 545994
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 134, col 25 to line 134, col 50 of module pubsub: 538239
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 134, col 25 to line 134, col 33 of module pubsub: 538239
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 134, col 38 to line 134, col 50 of module pubsub: 137959
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 135, col 33 to line 135, col 45 of module pubsub: 464923
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 135, col 33 to line 135, col 40 of module pubsub: 524759
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 135, col 44 to line 135, col 45 of module pubsub: 524759
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 136, col 33 to line 138, col 109 of module pubsub: 464923
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 136, col 51 to line 138, col 109 of module pubsub: 464923
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  ||line 136, col 52 to line 136, col 65 of module pubsub: 464923
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  ||line 136, col 74 to line 138, col 108 of module pubsub: 464920
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  ||line 136, col 84 to line 138, col 108 of module pubsub: 464924
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |||line 136, col 87 to line 136, col 121 of module pubsub: 464924
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  ||||line 136, col 87 to line 136, col 96 of module pubsub: 464924
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  ||||line 136, col 101 to line 136, col 121 of module pubsub: 464720
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |||line 137, col 89 to line 137, col 155 of module pubsub: 69152
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2775:0 @!@!@
+  ||||line 137, col 89 to line 137, col 131 of module pubsub: 69152:137615
+@!@!@ENDMSG 2775 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |||||line 137, col 96 to line 137, col 121 of module pubsub: 69152
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  ||||line 137, col 136 to line 137, col 155 of module pubsub: 69152
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |||line 138, col 89 to line 138, col 108 of module pubsub: 395772
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 139, col 33 to line 141, col 77 of module pubsub: 464924
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 139, col 39 to line 141, col 77 of module pubsub: 464924
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  ||line 139, col 40 to line 139, col 41 of module pubsub: 464924
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  ||line 139, col 50 to line 141, col 76 of module pubsub: 464920
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  ||line 139, col 60 to line 141, col 76 of module pubsub: 464924
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |||line 139, col 63 to line 139, col 97 of module pubsub: 464924
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  ||||line 139, col 63 to line 139, col 72 of module pubsub: 464924
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  ||||line 139, col 77 to line 139, col 97 of module pubsub: 464720
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |||line 140, col 65 to line 140, col 78 of module pubsub: 69152
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |||line 141, col 65 to line 141, col 76 of module pubsub: 395772
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 142, col 33 to line 142, col 95 of module pubsub: 464924
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 142, col 49 to line 142, col 95 of module pubsub: 464924
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  ||line 142, col 50 to line 142, col 61 of module pubsub: 464924
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  ||line 142, col 72 to line 142, col 75 of module pubsub: 464924
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  ||line 142, col 78 to line 142, col 86 of module pubsub: 464924
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |||line 142, col 78 to line 142, col 80 of module pubsub: 464924
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |||line 142, col 82 to line 142, col 85 of module pubsub: 464924
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  ||line 142, col 91 to line 142, col 94 of module pubsub: 464924
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 143, col 33 to line 143, col 70 of module pubsub: 464924
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 143, col 39 to line 143, col 70 of module pubsub: 464924
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 144, col 33 to line 144, col 66 of module pubsub: 13480
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 145, col 33 to line 145, col 80 of module pubsub: 13479
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 146, col 22 to line 146, col 57 of module pubsub: 478401
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2772:0 @!@!@
+<Terminating line 151, col 1 to line 151, col 11 of module pubsub>: 0:10
+@!@!@ENDMSG 2772 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 151, col 40 to line 151, col 56 of module pubsub: 349770
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 151, col 40 to line 151, col 47 of module pubsub: 349740
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  ||line 151, col 40 to line 151, col 41 of module pubsub: 349740
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  ||line 151, col 43 to line 151, col 46 of module pubsub: 349740
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 151, col 31 to line 151, col 37 of module pubsub: 273002
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 152, col 19 to line 152, col 32 of module pubsub: 10
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2774:0 @!@!@
+<SafetySeenOrMissed line 87, col 1 to line 87, col 18 of module pubsub>
+@!@!@ENDMSG 2774 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 87, col 23 to line 87, col 108 of module pubsub: 309302
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 87, col 45 to line 87, col 108 of module pubsub: 618604
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  ||line 87, col 64 to line 87, col 108 of module pubsub: 6186040
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |||line 87, col 64 to line 87, col 81 of module pubsub: 6186040
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |||line 87, col 86 to line 87, col 108 of module pubsub: 2863743
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  ||line 87, col 54 to line 87, col 61 of module pubsub: 618606
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 87, col 32 to line 87, col 42 of module pubsub: 309303
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2774:0 @!@!@
+<TypeInvariant line 90, col 1 to line 90, col 13 of module pubsub>
+@!@!@ENDMSG 2774 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 91, col 5 to line 94, col 40 of module pubsub: 309303
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2777:0 @!@!@
+End of statistics (please note that for performance reasons large models
+are best checked with coverage and cost statistics disabled).
+@!@!@ENDMSG 2777 @!@!@
+@!@!@STARTMSG 2200:0 @!@!@
+Progress(35) at 2025-06-22 17:04:25: 871,132 states generated, 386,411 distinct states found, 0 states left on queue.
+@!@!@ENDMSG 2200 @!@!@
+@!@!@STARTMSG 2192:0 @!@!@
+Checking 20 branches of temporal properties for the complete state space with 7728220 total distinct states at (2025-06-22 17:04:25)
+@!@!@ENDMSG 2192 @!@!@
+@!@!@STARTMSG 2267:0 @!@!@
+Finished checking temporal properties in 19min 00s at 2025-06-22 17:23:25
+@!@!@ENDMSG 2267 @!@!@
+@!@!@STARTMSG 2193:0 @!@!@
+Model checking completed. No error has been found.
+  Estimates of the probability that TLC did not check all reachable states
+  because two distinct states had the same fingerprint:
+  calculated (optimistic):  val = 1.0E-8
+  based on the actual fingerprints:  val = 1.1E-8
+@!@!@ENDMSG 2193 @!@!@
+@!@!@STARTMSG 2201:0 @!@!@
+The coverage statistics at 2025-06-22 17:23:46 (see https://explain.tlapl.us/module-coverage-statistics for how to interpret the following statistics).
+@!@!@ENDMSG 2201 @!@!@
+@!@!@STARTMSG 2779:0 @!@!@
+<SentEnd line 84, col 26 to line 84, col 32 of module pubsub>: 2
+@!@!@ENDMSG 2779 @!@!@
+@!@!@STARTMSG 2779:0 @!@!@
+<VC line 84, col 18 to line 84, col 19 of module pubsub>: 10
+@!@!@ENDMSG 2779 @!@!@
+@!@!@STARTMSG 2779:0 @!@!@
+<VS line 84, col 22 to line 84, col 23 of module pubsub>: 101
+@!@!@ENDMSG 2779 @!@!@
+@!@!@STARTMSG 2779:0 @!@!@
+<MissedVersions line 84, col 49 to line 84, col 62 of module pubsub>: 8854
+@!@!@ENDMSG 2779 @!@!@
+@!@!@STARTMSG 2779:0 @!@!@
+<Q line 84, col 15 to line 84, col 15 of module pubsub>: 10
+@!@!@ENDMSG 2779 @!@!@
+@!@!@STARTMSG 2779:0 @!@!@
+<pc line 84, col 11 to line 84, col 12 of module pubsub>: 6
+@!@!@ENDMSG 2779 @!@!@
+@!@!@STARTMSG 2779:0 @!@!@
+<sent line 96, col 10 to line 96, col 13 of module pubsub>: 10
+@!@!@ENDMSG 2779 @!@!@
+@!@!@STARTMSG 2779:0 @!@!@
+<SeenVersions line 84, col 35 to line 84, col 46 of module pubsub>: 115623
+@!@!@ENDMSG 2779 @!@!@
+@!@!@STARTMSG 2773:0 @!@!@
+<Init line 102, col 1 to line 102, col 4 of module pubsub>: 1:1
+@!@!@ENDMSG 2773 @!@!@
+@!@!@STARTMSG 2775:0 @!@!@
+  line 103, col 16 to line 103, col 41 of module pubsub: 1:4
+@!@!@ENDMSG 2775 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 103, col 23 to line 103, col 24 of module pubsub: 1
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2775:0 @!@!@
+  line 105, col 17 to line 105, col 41 of module pubsub: 1:2
+@!@!@ENDMSG 2775 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 105, col 24 to line 105, col 34 of module pubsub: 1
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 106, col 12 to line 106, col 26 of module pubsub: 1
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2775:0 @!@!@
+  line 107, col 27 to line 107, col 76 of module pubsub: 1:2
+@!@!@ENDMSG 2775 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 107, col 34 to line 107, col 44 of module pubsub: 1
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2775:0 @!@!@
+  line 108, col 29 to line 108, col 78 of module pubsub: 1:2
+@!@!@ENDMSG 2775 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 108, col 36 to line 108, col 46 of module pubsub: 1
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2775:0 @!@!@
+  line 110, col 19 to line 110, col 45 of module pubsub: 1:1
+@!@!@ENDMSG 2775 @!@!@
+@!@!@STARTMSG 2775:0 @!@!@
+  |line 110, col 29 to line 110, col 38 of module pubsub: 1:2
+@!@!@ENDMSG 2775 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  ||line 110, col 30 to line 110, col 37 of module pubsub: 1
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 111, col 12 to line 112, col 78 of module pubsub: 1
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2775:0 @!@!@
+  |line 111, col 17 to line 112, col 78 of module pubsub: 1:3
+@!@!@ENDMSG 2775 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  ||line 111, col 27 to line 111, col 33 of module pubsub: 1
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2772:0 @!@!@
+<SenderWhileLoop line 114, col 1 to line 114, col 21 of module pubsub>: 18908:136619
+@!@!@ENDMSG 2772 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 114, col 29 to line 114, col 56 of module pubsub: 523094
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 114, col 29 to line 114, col 36 of module pubsub: 386475
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 115, col 32 to line 115, col 55 of module pubsub: 136619
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 116, col 37 to line 119, col 84 of module pubsub: 34219
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 120, col 40 to line 120, col 78 of module pubsub: 102400
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 121, col 40 to line 121, col 66 of module pubsub: 102400
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 122, col 29 to line 123, col 58 of module pubsub: 136619
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2772:0 @!@!@
+<SenderEnd line 125, col 1 to line 125, col 15 of module pubsub>: 7799:102400
+@!@!@ENDMSG 2772 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 125, col 23 to line 125, col 44 of module pubsub: 488875
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 125, col 23 to line 125, col 30 of module pubsub: 386475
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 126, col 23 to line 126, col 37 of module pubsub: 102400
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 127, col 23 to line 127, col 56 of module pubsub: 102400
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 128, col 23 to line 129, col 42 of module pubsub: 102400
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2772:0 @!@!@
+<RecvLoop line 133, col 1 to line 133, col 14 of module pubsub>: 359703:628204
+@!@!@ENDMSG 2772 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 133, col 22 to line 133, col 42 of module pubsub: 1401154
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 133, col 22 to line 133, col 29 of module pubsub: 772950
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 134, col 25 to line 134, col 50 of module pubsub: 723798
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 134, col 25 to line 134, col 33 of module pubsub: 723798
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 134, col 38 to line 134, col 50 of module pubsub: 245760
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 135, col 33 to line 135, col 45 of module pubsub: 579052
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 135, col 33 to line 135, col 40 of module pubsub: 674646
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 135, col 44 to line 135, col 45 of module pubsub: 674646
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 136, col 33 to line 138, col 109 of module pubsub: 579052
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 136, col 51 to line 138, col 109 of module pubsub: 579052
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  ||line 136, col 52 to line 136, col 65 of module pubsub: 579052
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  ||line 136, col 74 to line 138, col 108 of module pubsub: 579052
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  ||line 136, col 84 to line 138, col 108 of module pubsub: 579052
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |||line 136, col 87 to line 136, col 121 of module pubsub: 579052
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  ||||line 136, col 87 to line 136, col 96 of module pubsub: 579052
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  ||||line 136, col 101 to line 136, col 121 of module pubsub: 578848
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |||line 137, col 89 to line 137, col 155 of module pubsub: 72356
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2775:0 @!@!@
+  ||||line 137, col 89 to line 137, col 131 of module pubsub: 72356:142044
+@!@!@ENDMSG 2775 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |||||line 137, col 96 to line 137, col 121 of module pubsub: 72356
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  ||||line 137, col 136 to line 137, col 155 of module pubsub: 72356
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |||line 138, col 89 to line 138, col 108 of module pubsub: 506696
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 139, col 33 to line 141, col 77 of module pubsub: 579052
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 139, col 39 to line 141, col 77 of module pubsub: 579052
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  ||line 139, col 40 to line 139, col 41 of module pubsub: 579052
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  ||line 139, col 50 to line 141, col 76 of module pubsub: 579052
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  ||line 139, col 60 to line 141, col 76 of module pubsub: 579052
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |||line 139, col 63 to line 139, col 97 of module pubsub: 579052
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  ||||line 139, col 63 to line 139, col 72 of module pubsub: 579052
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  ||||line 139, col 77 to line 139, col 97 of module pubsub: 578848
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |||line 140, col 65 to line 140, col 78 of module pubsub: 72356
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |||line 141, col 65 to line 141, col 76 of module pubsub: 506696
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 142, col 33 to line 142, col 95 of module pubsub: 579052
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 143, col 33 to line 143, col 70 of module pubsub: 579052
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 144, col 33 to line 144, col 66 of module pubsub: 49152
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 145, col 33 to line 145, col 80 of module pubsub: 49152
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 146, col 22 to line 146, col 57 of module pubsub: 628204
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2772:0 @!@!@
+<Terminating line 151, col 1 to line 151, col 11 of module pubsub>: 0:4096
+@!@!@ENDMSG 2772 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 151, col 40 to line 151, col 56 of module pubsub: 570795
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 151, col 40 to line 151, col 47 of module pubsub: 558507
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 151, col 31 to line 151, col 37 of module pubsub: 386475
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 152, col 19 to line 152, col 32 of module pubsub: 4096
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2774:0 @!@!@
+<SafetySeenOrMissed line 87, col 1 to line 87, col 18 of module pubsub>
+@!@!@ENDMSG 2774 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 87, col 23 to line 87, col 108 of module pubsub: 386411
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 87, col 45 to line 87, col 108 of module pubsub: 772822
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  ||line 87, col 64 to line 87, col 108 of module pubsub: 7728220
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |||line 87, col 64 to line 87, col 81 of module pubsub: 7728220
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |||line 87, col 86 to line 87, col 108 of module pubsub: 3916734
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  ||line 87, col 54 to line 87, col 61 of module pubsub: 772822
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 87, col 32 to line 87, col 42 of module pubsub: 386411
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2774:0 @!@!@
+<TypeInvariant line 90, col 1 to line 90, col 13 of module pubsub>
+@!@!@ENDMSG 2774 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 91, col 5 to line 94, col 40 of module pubsub: 386411
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2777:0 @!@!@
+End of statistics (please note that for performance reasons large models
+are best checked with coverage and cost statistics disabled).
+@!@!@ENDMSG 2777 @!@!@
+@!@!@STARTMSG 2200:0 @!@!@
+Progress(35) at 2025-06-22 17:23:46: 871,132 states generated (32,002 s/min), 386,411 distinct states found (14,195 ds/min), 0 states left on queue.
+@!@!@ENDMSG 2200 @!@!@
+@!@!@STARTMSG 2199:0 @!@!@
+871132 states generated, 386411 distinct states found, 0 states left on queue.
+@!@!@ENDMSG 2199 @!@!@
+@!@!@STARTMSG 2194:0 @!@!@
+The depth of the complete state graph search is 35.
+@!@!@ENDMSG 2194 @!@!@
+@!@!@STARTMSG 2268:0 @!@!@
+The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 3 and the 95th percentile is 2).
+@!@!@ENDMSG 2268 @!@!@
+@!@!@STARTMSG 2186:0 @!@!@
+Finished in 1633932ms at (2025-06-22 17:23:47)
+@!@!@ENDMSG 2186 @!@!@

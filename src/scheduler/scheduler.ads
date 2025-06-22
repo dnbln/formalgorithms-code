@@ -35,11 +35,11 @@ package Scheduler is
 private
    Null_Future : constant Future_Access := null;
    type Poll_Result is new sys_event_h.kevent; -- KEvent structure for polling
-   type Poll_Result_Buffer is array (1 .. 1024) of Poll_Result
+   type Poll_Result_Buffer is array (1 .. 16384) of Poll_Result
    with Convention => C;
    type Poll_Results is record
       Count  : Integer := 0; -- Number of events returned
-      Events : Poll_Result_Buffer; -- Array of events
+      Events : Poll_Result_Buffer := (others => <>); -- Array of events
    end record;
 
    Local_Worker_Queue_Size_Total : constant Natural := 256;
@@ -165,7 +165,8 @@ private
               T_Id         => 0));
       Size_QB           : Natural := 0;
 
-      IO_Q : IO_Blocked_Queue_Access := null;
+      IO_Q   : IO_Blocked_Queue_Access := null;
+      Poll_R : Poll_Results;
 
       Last_Poll_Time : Ada.Calendar.Time := Ada.Calendar.Clock;
    end Global_Task_Queue;
@@ -204,6 +205,8 @@ private
         Local_Worker_Task_Info_Array; -- Buffer for blocked tasks
       Size_QB         : Natural := 0;
 
+      Poll_R : Poll_Results;
+
       IO_Q : IO_Blocked_Queue_Access := null;
    end Worker_Task_Queue;
 
@@ -237,8 +240,8 @@ private
      (KQ : IO_Blocked_Queue_Access; FD : Interfaces.C.int);
    procedure Remove_Write_From_IO_Blocked_Queue
      (KQ : IO_Blocked_Queue_Access; FD : Interfaces.C.int);
-   function Poll_IO_Blocked_Queue
-     (KQ : IO_Blocked_Queue_Access) return Poll_Results;
+   procedure Poll_IO_Blocked_Queue
+     (KQ : IO_Blocked_Queue_Access; Results : out Poll_Results);
 
    procedure Wake_On_IO_Read
      (Sched_Cx : Scheduler.Sched_Cx_Access; File : Interfaces.C.int);

@@ -1,11 +1,11 @@
 #![feature(integer_atomics)]
 
-use std::{sync::atomic::AtomicU128, time::SystemTime};
+use std::{sync::atomic::{AtomicU128, AtomicUsize}, time::SystemTime};
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-const TOTAL_CONNECTIONS: usize = 10000;
-const ITERATIONS: usize = 2;
+const TOTAL_CONNECTIONS: usize = 1000;
+const ITERATIONS: usize = 10;
 const BUF_SIZE: usize = 1024;
 const CONNECTIONS_PER_SECOND: usize = 2000;
 
@@ -15,6 +15,7 @@ static BARRIER: std::sync::LazyLock<tokio::sync::Barrier> =
 const ALPHABET: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 
 static TIME_STARTED: AtomicU128 = AtomicU128::new(0);
+static CONN_ERRORS: AtomicUsize = AtomicUsize::new(0);
 
 async fn worker(id: usize) {
     tokio::time::sleep(std::time::Duration::from_millis(
@@ -26,6 +27,10 @@ async fn worker(id: usize) {
             Ok(s) => break s,
             Err(e) => {
                 eprintln!("Failed to connect: {}", e);
+                if CONN_ERRORS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) > 20 {
+                    eprintln!("Too many connection errors, exiting.");
+                    std::process::exit(1);
+                }
                 tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             }
         }
@@ -54,6 +59,8 @@ async fn worker(id: usize) {
         if rbuf != buf {
             eprintln!("Data mismatch: sent {:?}, received {:?}", buf, rbuf);
         }
+
+        // tokio::time::sleep(std::time::Duration::from_nanos(((id + x) % 100) as u64)).await;
     }
 
     socket.shutdown().await.unwrap();

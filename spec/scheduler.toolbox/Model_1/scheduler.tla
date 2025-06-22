@@ -521,9 +521,9 @@ begin
                         K := 1;
                         PerformFirstPushPull:
                             if GQPPPointer <= GQALast /\ K <= LQASizes[self] then
-                                task := LQA[K];
-                                LQA[K] := GQA[((GQPPPointer - 1) % GQ) + 1];
-                                GQA[((GQPPPointer - 1) % GQ) + 1] := task;
+                                task := LQA[self][K];
+                                LQA[self][K] := GQA[((GQPPPointer - 1) % GQSize) + 1];
+                                GQA[((GQPPPointer - 1) % GQSize) + 1] := task;
                                 GQPPPointer := IF GQPPPointer < GQALast THEN GQPPPointer + 1 ELSE GQAFirst + 1;
                                 K := K + 1;
                             else
@@ -532,9 +532,9 @@ begin
                     PushPull:
                         while GQPPPointer # I /\ K <= LQASizes[self] do
                             PerformPushPull:
-                                task := LQA[K];
-                                LQA[K] := GQA[((GQPPPointer - 1) % GQ) + 1];
-                                GQA[((GQPPPointer - 1) % GQ) + 1] := task;
+                                task := LQA[self][K];
+                                LQA[self][K] := GQA[((GQPPPointer - 1) % GQSize) + 1];
+                                GQA[((GQPPPointer - 1) % GQSize) + 1] := task;
                             PushPullStep:
                                 GQPPPointer := IF GQPPPointer < GQALast THEN GQPPPointer + 1 ELSE GQAFirst + 1;
                                 K := K + 1;
@@ -1024,7 +1024,7 @@ end process;
 \*** End of client code
 
 end algorithm; *)
-\* BEGIN TRANSLATION (chksum(pcal) = "9fcff08e" /\ chksum(tla) = "f87e0d80")
+\* BEGIN TRANSLATION (chksum(pcal) = "e7f3a51d" /\ chksum(tla) = "823003fd")
 \* Label CheckLQSize of process WorkerThread at line 581 col 33 changed to CheckLQSize_
 \* Label LockGQ of process WorkerThread at line 583 col 41 changed to LockGQ_
 \* Label PushGQLoop of process WorkerThread at line 587 col 41 changed to PushGQLoop_
@@ -2078,9 +2078,9 @@ PushPullBegin(self) == /\ pc[self] = "PushPullBegin"
 
 PerformFirstPushPull(self) == /\ pc[self] = "PerformFirstPushPull"
                               /\ IF GQPPPointer <= GQALast /\ K[self] <= LQASizes[self]
-                                    THEN /\ task' = [task EXCEPT ![self] = LQA[K[self]]]
-                                         /\ LQA' = [LQA EXCEPT ![K[self]] = GQA[((GQPPPointer - 1) % GQ) + 1]]
-                                         /\ GQA' = [GQA EXCEPT ![((GQPPPointer - 1) % GQ) + 1] = task'[self]]
+                                    THEN /\ task' = [task EXCEPT ![self] = LQA[self][K[self]]]
+                                         /\ LQA' = [LQA EXCEPT ![self][K[self]] = GQA[((GQPPPointer - 1) % GQSize) + 1]]
+                                         /\ GQA' = [GQA EXCEPT ![((GQPPPointer - 1) % GQSize) + 1] = task'[self]]
                                          /\ GQPPPointer' = (IF GQPPPointer < GQALast THEN GQPPPointer + 1 ELSE GQAFirst + 1)
                                          /\ K' = [K EXCEPT ![self] = K[self] + 1]
                                          /\ pc' = [pc EXCEPT ![self] = "PushPull"]
@@ -2118,9 +2118,9 @@ PushPull(self) == /\ pc[self] = "PushPull"
                                   Steps, PolledRead >>
 
 PerformPushPull(self) == /\ pc[self] = "PerformPushPull"
-                         /\ task' = [task EXCEPT ![self] = LQA[K[self]]]
-                         /\ LQA' = [LQA EXCEPT ![K[self]] = GQA[((GQPPPointer - 1) % GQ) + 1]]
-                         /\ GQA' = [GQA EXCEPT ![((GQPPPointer - 1) % GQ) + 1] = task'[self]]
+                         /\ task' = [task EXCEPT ![self] = LQA[self][K[self]]]
+                         /\ LQA' = [LQA EXCEPT ![self][K[self]] = GQA[((GQPPPointer - 1) % GQSize) + 1]]
+                         /\ GQA' = [GQA EXCEPT ![((GQPPPointer - 1) % GQSize) + 1] = task'[self]]
                          /\ pc' = [pc EXCEPT ![self] = "PushPullStep"]
                          /\ UNCHANGED << GQAFirst, GQALast, GQB, GQBSize, 
                                          GQPPPointer, GQLock, LQAClock, 
@@ -4244,5 +4244,5 @@ Termination == <>(\A self \in ProcSet: pc[self] = "Done")
 
 =============================================================================
 \* Modification History
-\* Last modified Sat Jun 21 14:48:22 CEST 2025 by dinu
+\* Last modified Sat Jun 21 18:03:14 CEST 2025 by dinu
 \* Created Sat May 24 12:56:52 CEST 2025 by dinu

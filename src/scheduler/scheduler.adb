@@ -10,10 +10,10 @@ with Interfaces.C;            use Interfaces.C;
 with sys_utypes_uint16_t_h;
 
 package body Scheduler is
-   IDLE_DELAY : constant := 0.05;  --  Idle delay in seconds, 50ms
+   IDLE_DELAY : constant := 0.0;  --  Idle delay in seconds, 50ms
    GQ_POLL_DELAY : constant := 0.005; -- 5ms
    Clock_Cycles_To_Push_Pull : constant Natural := 10; -- Number of clock cycles to wait to push and pull from the global queue.
-   BOUNDED_FAIRNESS : constant Boolean := True;
+   BOUNDED_FAIRNESS : constant Boolean := False;
    -- Bounded fairness guarantees that all tasks will eventually run,
    -- and no task will be starved for longer than
    -- (Clock_Cycles_To_Push_Pull + 1) * Workers * N, where N is the number of tasks currently in the system
@@ -276,10 +276,9 @@ package body Scheduler is
       procedure Poll_IO (Poll_R : out Poll_Results) is
       begin
          if IO_Q = null then
-            Poll_R := (Events => (others => <>), Count => 0);
             return;
          end if;
-         Poll_R := Poll_IO_Blocked_Queue (KQ => IO_Q);
+         Poll_IO_Blocked_Queue (KQ => IO_Q, Results => Poll_R);
          Last_Poll_Time := Ada.Calendar.Clock;
       end Poll_IO;
 
@@ -753,13 +752,12 @@ package body Scheduler is
       --     & Natural'Image (Size));
       end Push_QB;
 
-      procedure Poll_IO (Poll_R : out Poll_Results) is
+      procedure Poll_IO is
       begin
          if IO_Q = null then
-            Poll_R := (Events => (others => <>), Count => 0);
             return;
          end if;
-         Poll_R := Poll_IO_Blocked_Queue (KQ => IO_Q);
+         Poll_IO_Blocked_Queue (KQ => IO_Q, Results => Poll_R);
       end Poll_IO;
 
       procedure Flush_Blocked is
@@ -787,7 +785,6 @@ package body Scheduler is
       procedure Process_QB is
          K                    : Natural := 0;
          Keep_Size            : Boolean := False;
-         Poll_R               : Poll_Results;
          Is_Ready             : Boolean := False;
          Data_Available_If_IO : Natural := 0;
          IO_Did_EOF           : Boolean := False;
@@ -799,7 +796,7 @@ package body Scheduler is
          if Size_QB = 0 then
             return;
          end if;
-         Poll_IO (Poll_R => Poll_R);
+         Poll_IO;
          if Poll_R.Count > 0 then
             for I in Poll_R.Events'First .. Poll_R.Count loop
                TI_Acc :=
@@ -1055,7 +1052,9 @@ package body Scheduler is
       end loop;
 
       -- delay 10ms if nothing else worked (no work currently)
-      delay IDLE_DELAY;
+      if IDLE_DELAY > 0.0 then
+         delay IDLE_DELAY;
+      end if;
    end Enqueue_Work_From_Other_Queues;
 
    procedure Print_All_States is
@@ -1329,24 +1328,23 @@ package body Scheduler is
       end if;
    end Remove_Write_From_IO_Blocked_Queue;
 
-   function Poll_IO_Blocked_Queue
-     (KQ : IO_Blocked_Queue_Access) return Poll_Results
+   procedure Poll_IO_Blocked_Queue
+     (KQ : IO_Blocked_Queue_Access; Results : out Poll_Results)
    is
-      Events     : Poll_Result_Buffer;
       Num_Events : Interfaces.C.int;
    begin
       Num_Events :=
         scheduler_io_h.poll_events
           (KQ.KQueue,
-           Events'Address,
+           Results.Events'Address,
            Interfaces.C.int (Poll_Result_Buffer'Length));
       if Integer (Num_Events) < 0 then
          raise Program_Error with "Error polling IO blocked queue";
       end if;
+      Results.Count := Natural (Num_Events);
       --  Ada.Text_IO.Put_Line
       --    ("Scheduler: Polling IO blocked queue, number of events: "
       --     & Integer'Image (Integer (Num_Events)));
-      return (Events => Events, Count => Integer (Num_Events));
    end Poll_IO_Blocked_Queue;
 
    procedure Wake_On_IO_Read
