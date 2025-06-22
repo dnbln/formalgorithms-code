@@ -1,0 +1,219 @@
+@!@!@STARTMSG 2262:0 @!@!@
+TLC2 Version 2.20 of Day Month 20?? (rev: 96056d9)
+@!@!@ENDMSG 2262 @!@!@
+@!@!@STARTMSG 2187:0 @!@!@
+Running breadth-first search Model-Checking with fp 117 and seed -4684116719391896467 with 8 workers on 8 cores with 3157MB heap and 7098MB offheap memory [pid: 94247] (Mac OS X 10.16 x86_64, AdoptOpenJDK 14.0.1 x86_64, OffHeapDiskFPSet, DiskStateQueue).
+@!@!@ENDMSG 2187 @!@!@
+@!@!@STARTMSG 2220:0 @!@!@
+Starting SANY...
+@!@!@ENDMSG 2220 @!@!@
+Parsing file /Users/dinu/rp/rp/spec/schedulerfairness.toolbox/Model_fairness/MC.tla
+Parsing file /Users/dinu/rp/rp/spec/schedulerfairness.toolbox/Model_fairness/schedulerfairness.tla
+Warning: symbols were renamed.
+Parsing file /private/var/folders/y7/381l32yj70gc7txzlnr5dy4h0000gp/T/AppTranslocation/4AEFB0A3-FED9-424D-853A-5E92B19FB079/d/TLA+ Toolbox.app/Contents/Eclipse/plugins/org.lamport.tlatools_1.0.0.202505200356/tla2sany/StandardModules/TLC.tla
+Parsing file /private/var/folders/y7/381l32yj70gc7txzlnr5dy4h0000gp/T/AppTranslocation/4AEFB0A3-FED9-424D-853A-5E92B19FB079/d/TLA+ Toolbox.app/Contents/Eclipse/plugins/org.lamport.tlatools_1.0.0.202505200356/tla2sany/StandardModules/Naturals.tla
+Parsing file /private/var/folders/y7/381l32yj70gc7txzlnr5dy4h0000gp/T/AppTranslocation/4AEFB0A3-FED9-424D-853A-5E92B19FB079/d/TLA+ Toolbox.app/Contents/Eclipse/plugins/org.lamport.tlatools_1.0.0.202505200356/tla2sany/StandardModules/Integers.tla
+Parsing file /private/var/folders/y7/381l32yj70gc7txzlnr5dy4h0000gp/T/AppTranslocation/4AEFB0A3-FED9-424D-853A-5E92B19FB079/d/TLA+ Toolbox.app/Contents/Eclipse/plugins/org.lamport.tlatools_1.0.0.202505200356/tla2sany/StandardModules/Sequences.tla
+Parsing file /private/var/folders/y7/381l32yj70gc7txzlnr5dy4h0000gp/T/AppTranslocation/4AEFB0A3-FED9-424D-853A-5E92B19FB079/d/TLA+ Toolbox.app/Contents/Eclipse/plugins/org.lamport.tlatools_1.0.0.202505200356/tla2sany/StandardModules/FiniteSets.tla
+Semantic processing of module Naturals
+Semantic processing of module Integers
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module schedulerfairness
+Semantic processing of module MC
+@!@!@STARTMSG 2219:0 @!@!@
+SANY finished.
+@!@!@ENDMSG 2219 @!@!@
+@!@!@STARTMSG 2185:0 @!@!@
+Starting... (2025-06-22 01:10:42)
+@!@!@ENDMSG 2185 @!@!@
+@!@!@STARTMSG 2189:0 @!@!@
+Computing initial states...
+@!@!@ENDMSG 2189 @!@!@
+@!@!@STARTMSG 2190:0 @!@!@
+Finished computing initial states: 1 distinct state generated at 2025-06-22 01:10:45.
+@!@!@ENDMSG 2190 @!@!@
+@!@!@STARTMSG 2200:0 @!@!@
+Progress(226) at 2025-06-22 01:10:48: 144,541 states generated (144,541 s/min), 37,768 distinct states found (37,768 ds/min), 904 states left on queue.
+@!@!@ENDMSG 2200 @!@!@
+@!@!@STARTMSG 2200:0 @!@!@
+Progress(2853) at 2025-06-22 01:11:48: 10,202,295 states generated (10,057,754 s/min), 2,910,040 distinct states found (2,872,272 ds/min), 1,053 states left on queue.
+@!@!@ENDMSG 2200 @!@!@
+@!@!@STARTMSG 2200:0 @!@!@
+Progress(5487) at 2025-06-22 01:12:48: 19,933,568 states generated (9,731,273 s/min), 5,690,431 distinct states found (2,780,391 ds/min), 1,050 states left on queue.
+@!@!@ENDMSG 2200 @!@!@
+@!@!@STARTMSG 2200:0 @!@!@
+Progress(8191) at 2025-06-22 01:13:48: 29,929,072 states generated (9,995,504 s/min), 8,546,311 distinct states found (2,855,880 ds/min), 1,049 states left on queue.
+@!@!@ENDMSG 2200 @!@!@
+@!@!@STARTMSG 2200:0 @!@!@
+Progress(10630) at 2025-06-22 01:14:48: 38,940,802 states generated (9,011,730 s/min), 11,121,115 distinct states found (2,574,804 ds/min), 1,053 states left on queue.
+@!@!@ENDMSG 2200 @!@!@
+@!@!@STARTMSG 2200:0 @!@!@
+Progress(13056) at 2025-06-22 01:15:48: 47,906,612 states generated (8,965,810 s/min), 13,682,732 distinct states found (2,561,617 ds/min), 1,049 states left on queue.
+@!@!@ENDMSG 2200 @!@!@
+@!@!@STARTMSG 2200:0 @!@!@
+Progress(15039) at 2025-06-22 01:16:48: 55,235,814 states generated (7,329,202 s/min), 15,776,870 distinct states found (2,094,138 ds/min), 1,055 states left on queue.
+@!@!@ENDMSG 2200 @!@!@
+@!@!@STARTMSG 2200:0 @!@!@
+Progress(17282) at 2025-06-22 01:17:48: 63,525,786 states generated (8,289,972 s/min), 18,145,442 distinct states found (2,368,572 ds/min), 1,054 states left on queue.
+@!@!@ENDMSG 2200 @!@!@
+@!@!@STARTMSG 2200:0 @!@!@
+Progress(19495) at 2025-06-22 01:18:48: 71,706,387 states generated (8,180,601 s/min), 20,482,657 distinct states found (2,337,215 ds/min), 1,050 states left on queue.
+@!@!@ENDMSG 2200 @!@!@
+@!@!@STARTMSG 2200:0 @!@!@
+Progress(21924) at 2025-06-22 01:19:48: 80,683,594 states generated (8,977,207 s/min), 23,047,696 distinct states found (2,565,039 ds/min), 1,052 states left on queue.
+@!@!@ENDMSG 2200 @!@!@
+@!@!@STARTMSG 2200:0 @!@!@
+Progress(24215) at 2025-06-22 01:20:48: 89,150,079 states generated (8,466,485 s/min), 25,466,700 distinct states found (2,419,004 ds/min), 1,054 states left on queue.
+@!@!@ENDMSG 2200 @!@!@
+@!@!@STARTMSG 2200:0 @!@!@
+Progress(26523) at 2025-06-22 01:21:48: 97,679,160 states generated (8,529,081 s/min), 27,903,591 distinct states found (2,436,891 ds/min), 1,053 states left on queue.
+@!@!@ENDMSG 2200 @!@!@
+@!@!@STARTMSG 2200:0 @!@!@
+Progress(28693) at 2025-06-22 01:22:48: 105,700,415 states generated (8,021,255 s/min), 30,195,383 distinct states found (2,291,792 ds/min), 1,051 states left on queue.
+@!@!@ENDMSG 2200 @!@!@
+@!@!@STARTMSG 2200:0 @!@!@
+Progress(30846) at 2025-06-22 01:23:48: 113,655,928 states generated (7,955,513 s/min), 32,468,176 distinct states found (2,272,793 ds/min), 1,053 states left on queue.
+@!@!@ENDMSG 2200 @!@!@
+@!@!@STARTMSG 2200:0 @!@!@
+Progress(32923) at 2025-06-22 01:24:48: 121,331,970 states generated (7,676,042 s/min), 34,661,574 distinct states found (2,193,398 ds/min), 1,053 states left on queue.
+@!@!@ENDMSG 2200 @!@!@
+@!@!@STARTMSG 2200:0 @!@!@
+Progress(35219) at 2025-06-22 01:25:48: 129,818,638 states generated (8,486,668 s/min), 37,086,342 distinct states found (2,424,768 ds/min), 1,053 states left on queue.
+@!@!@ENDMSG 2200 @!@!@
+@!@!@STARTMSG 2200:0 @!@!@
+Progress(37351) at 2025-06-22 01:26:48: 137,697,977 states generated (7,879,339 s/min), 39,337,596 distinct states found (2,251,254 ds/min), 1,054 states left on queue.
+@!@!@ENDMSG 2200 @!@!@
+@!@!@STARTMSG 2200:0 @!@!@
+Progress(39675) at 2025-06-22 01:27:48: 146,286,371 states generated (8,588,394 s/min), 41,791,426 distinct states found (2,453,830 ds/min), 1,052 states left on queue.
+@!@!@ENDMSG 2200 @!@!@
+@!@!@STARTMSG 2200:0 @!@!@
+Progress(41890) at 2025-06-22 01:28:48: 154,472,156 states generated (8,185,785 s/min), 44,130,234 distinct states found (2,338,808 ds/min), 1,050 states left on queue.
+@!@!@ENDMSG 2200 @!@!@
+@!@!@STARTMSG 2200:0 @!@!@
+Progress(44208) at 2025-06-22 01:29:48: 163,038,931 states generated (8,566,775 s/min), 46,577,890 distinct states found (2,447,656 ds/min), 1,052 states left on queue.
+@!@!@ENDMSG 2200 @!@!@
+@!@!@STARTMSG 2200:0 @!@!@
+Progress(46441) at 2025-06-22 01:30:48: 171,291,445 states generated (8,252,514 s/min), 48,935,776 distinct states found (2,357,886 ds/min), 1,052 states left on queue.
+@!@!@ENDMSG 2200 @!@!@
+@!@!@STARTMSG 2200:0 @!@!@
+Progress(48671) at 2025-06-22 01:31:48: 179,534,566 states generated (8,243,121 s/min), 51,290,543 distinct states found (2,354,767 ds/min), 1,053 states left on queue.
+@!@!@ENDMSG 2200 @!@!@
+@!@!@STARTMSG 2200:0 @!@!@
+Progress(50930) at 2025-06-22 01:32:48: 187,881,680 states generated (8,347,114 s/min), 53,675,864 distinct states found (2,385,321 ds/min), 1,052 states left on queue.
+@!@!@ENDMSG 2200 @!@!@
+@!@!@STARTMSG 2200:0 @!@!@
+Progress(53160) at 2025-06-22 01:33:48: 196,123,879 states generated (8,242,199 s/min), 56,030,787 distinct states found (2,354,923 ds/min), 1,052 states left on queue.
+@!@!@ENDMSG 2200 @!@!@
+@!@!@STARTMSG 2200:0 @!@!@
+Progress(55445) at 2025-06-22 01:34:48: 204,567,901 states generated (8,444,022 s/min), 58,443,379 distinct states found (2,412,592 ds/min), 1,052 states left on queue.
+@!@!@ENDMSG 2200 @!@!@
+@!@!@STARTMSG 2200:0 @!@!@
+Progress(57372) at 2025-06-22 01:35:48: 211,691,368 states generated (7,123,467 s/min), 60,478,667 distinct states found (2,035,288 ds/min), 1,053 states left on queue.
+@!@!@ENDMSG 2200 @!@!@
+@!@!@STARTMSG 2200:0 @!@!@
+Progress(59519) at 2025-06-22 01:36:48: 219,626,669 states generated (7,935,301 s/min), 62,745,904 distinct states found (2,267,237 ds/min), 1,051 states left on queue.
+@!@!@ENDMSG 2200 @!@!@
+@!@!@STARTMSG 2200:0 @!@!@
+Progress(61647) at 2025-06-22 01:37:48: 227,489,792 states generated (7,863,123 s/min), 64,992,443 distinct states found (2,246,539 ds/min), 1,050 states left on queue.
+@!@!@ENDMSG 2200 @!@!@
+@!@!@STARTMSG 2200:0 @!@!@
+Progress(63842) at 2025-06-22 01:38:48: 235,602,383 states generated (8,112,591 s/min), 67,310,334 distinct states found (2,317,891 ds/min), 1,051 states left on queue.
+@!@!@ENDMSG 2200 @!@!@
+@!@!@STARTMSG 2200:0 @!@!@
+Progress(65916) at 2025-06-22 01:39:48: 243,267,842 states generated (7,665,459 s/min), 69,500,569 distinct states found (2,190,235 ds/min), 1,051 states left on queue.
+@!@!@ENDMSG 2200 @!@!@
+@!@!@STARTMSG 2195:0 @!@!@
+Checkpointing of run /Users/dinu/rp/rp/spec/schedulerfairness.toolbox/Model_fairness/25-06-22-01-10-41.846
+@!@!@ENDMSG 2195 @!@!@
+@!@!@STARTMSG 1000:1 @!@!@
+TLC threw an unexpected exception.
+This was probably caused by an error in the spec or model.
+See the User Output or TLC Console for clues to what happened.
+The exception was a java.lang.RuntimeException
+: @!@!@STARTMSG 2282:0 @!@!@
+The specification contains one or more behaviors with 65536 or more states,
+but TLC can only handle behaviors of length up to 65535 states. The last
+state in the behavior is:
+/\ GQAFirst = 2
+/\ I_ = <<3>>
+/\ I = (2 :> 4)
+/\ J = <<1>>
+/\ K = <<0>>
+/\ L = <<1>>
+/\ ClkCycles = <<0>>
+/\ lqbuf = <<<<NullTask, NullTask, NullTask, NullTask>>>>
+/\ RoundRobinToken = 1
+/\ LQAClock = <<1>>
+/\ FuturePush = <<NullFuture>>
+/\ GQPPPointer = 1015
+/\ GQBSize = 0
+/\ tid_ = 1
+/\ RTStarted = TRUE
+/\ GQA = <<[t_id |-> 3, state |-> "ready", future |-> 5, clock_failed |-> 0], [t_id |-> 5, state |-> "ready", future |-> 7, clock_failed |-> 0], NullTask, NullTask, NullTask, NullTask, NullTask, NullTask>>
+/\ GQB = << NullTask,
+   NullTask,
+   NullTask,
+   NullTask,
+   NullTask,
+   NullTask,
+   NullTask,
+   NullTask >>
+/\ Futures = ( 3 :> "future_sync_completed" @@
+  4 :> "future_sync_new" @@
+  5 :> "future_sync_completed" @@
+  6 :> "future_sync_new" @@
+  7 :> "future_sync_completed" @@
+  8 :> "future_sync_new" @@
+  9 :> "future_sync_new" )
+/\ Steps = (4 :> 0 @@ 5 :> 3 @@ 6 :> 0 @@ 7 :> 3 @@ 8 :> 0 @@ 9 :> 0)
+/\ HasWork = <<FALSE>>
+/\ Steps_ = (3 :> 6)
+/\ RTStopped = FALSE
+/\ LQA = <<<<NullTask, NullTask, NullTask, [t_id |-> 6, state |-> "ready", future |-> 8, clock_failed |-> 0]>>>>
+/\ LQB = <<<<[t_id |-> 3, state |-> "ready", future |-> 5, clock_failed |-> 1], [t_id |-> 3, state |-> "ready", future |-> 5, clock_failed |-> 0], NullTask, NullTask>>>>
+/\ TasksFinished = 3
+/\ LQASizes = <<0>>
+/\ pc = ( 0 :> "RTFinish" @@
+  1 :> "WorkStealingBegin" @@
+  2 :> "TPPStart" @@
+  3 :> "Done" @@
+  4 :> "OtherFutureStarted" @@
+  5 :> "Done" @@
+  6 :> "OtherFutureStarted" @@
+  7 :> "Done" @@
+  8 :> "AwaitInLoop" @@
+  9 :> "OtherFutureStarted" )
+/\ FuturesBlocked = ( 3 :> NullFB @@
+  4 :> NullFB @@
+  5 :> NullFB @@
+  6 :> NullFB @@
+  7 :> NullFB @@
+  8 :> NullFB @@
+  9 :> NullFB )
+/\ FutureWorkers = (3 :> 1 @@ 4 :> 0 @@ 5 :> 1 @@ 6 :> 0 @@ 7 :> 1 @@ 8 :> 0 @@ 9 :> 0)
+/\ tid = (2 :> 7)
+/\ LQBSizes = <<0>>
+/\ LQLocks = <<NullLock>>
+/\ GQLock = NullLock
+/\ task = <<[t_id |-> 5, state |-> "running", future |-> 7, clock_failed |-> 0]>>
+/\ TaskIdCurrent = 7
+/\ wr = (2 :> 1)
+/\ GQALast = 2
+/\ TaskReadyAges = <<NullTRA, 8, NullTRA, 8, NullTRA, 8, 8>>
+
+@!@!@ENDMSG 2282 @!@!@
+@!@!@ENDMSG 1000 @!@!@
+@!@!@STARTMSG 2200:0 @!@!@
+Progress(68070) at 2025-06-22 01:45:51: 251,226,207 states generated (7,145,027 s/min), 71,774,420 distinct states found (2,041,308 ds/min), 1,056 states left on queue.
+@!@!@ENDMSG 2200 @!@!@
+@!@!@STARTMSG 2199:0 @!@!@
+251226207 states generated, 71774420 distinct states found, 1056 states left on queue.
+@!@!@ENDMSG 2199 @!@!@
+@!@!@STARTMSG 2194:0 @!@!@
+The depth of the complete state graph search is 68070.
+@!@!@ENDMSG 2194 @!@!@
+@!@!@STARTMSG 2186:0 @!@!@
+Finished in 2109670ms at (2025-06-22 01:45:51)
+@!@!@ENDMSG 2186 @!@!@
